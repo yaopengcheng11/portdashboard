@@ -1,0 +1,18 @@
+[
+  {
+    "id": "hermes-webui",
+    "name": "Hermes WebUI 可视化主站",
+    "cwd": "/home/yaopc/hermes-webui",
+    "command": "bash run.sh",
+    "port": 8787,
+    "description": "基于 python3 server.py 构建的 Hermes 交互主面板（第三方面板）"
+  },
+  {
+    "id": "hermes-dashboard",
+    "name": "Hermes Dashboard 官方终端",
+    "cwd": "/home/yaopc/.hermes/hermes-agent",
+    "command": "hermes dashboard --no-open --port 9119",
+    "port": 9119,
+    "description": "Hermes 官方自带的管理面板，负责配置、密钥、会话等监控"
+  }
+]

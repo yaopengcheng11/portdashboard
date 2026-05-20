@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PORT DASHBOARD - 使用与部署指南说明书</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --background: #041c1c;
+      --midground: #ffe6cb;
+      --glow-color: rgba(255, 189, 56, 0.35);
+      --card-bg: #062a2a;
+      --card-border: rgba(255, 230, 203, 0.15);
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+    body {
+      background-color: var(--background);
+      color: var(--midground);
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .crt-overlay::after {
+      content: " ";
+      display: block;
+      position: fixed;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.15) 50%);
+      background-size: 100% 4px;
+      z-index: 99999;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    .ambient-glow {
+      position: fixed;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100vw;
+      height: 60vh;
+      background: radial-gradient(circle, var(--glow-color) 0%, rgba(4, 28, 28, 0) 70%);
+      z-index: -1;
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    .retro-border {
+      border: 1px solid var(--card-border);
+      box-shadow: 0 0 15px rgba(255, 189, 56, 0.05);
+    }
+    .glow-active {
+      border-color: var(--midground);
+      box-shadow: 0 0 20px rgba(255, 189, 56, 0.2);
+    }
+    code {
+      font-family: var(--font-mono);
+      background-color: #010a0a;
+      border: 1px solid rgba(255, 230, 203, 0.15);
+      color: #34d399; /* Emerald 400 */
+      padding: 0.15rem 0.4rem;
+      border-radius: 0.25rem;
+      font-size: 0.875rem;
+    }
+    pre code {
+      display: block;
+      padding: 1rem;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            hermes: {
+              teal: '#041c1c',
+              cream: '#ffe6cb',
+              accent: '#ffbd38',
+              card: '#062a2a',
+              dimmed: '#a59381'
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="crt-overlay min-h-screen py-10 px-4 md:px-8">
+  <div class="ambient-glow"></div>
+
+  <div class="max-w-4xl mx-auto space-y-10">
+    
+    <!-- 顶栏标题 -->
+    <header class="retro-border glow-active bg-hermes-card/80 p-8 rounded flex flex-col md:flex-row justify-between items-center gap-6">
+      <div class="space-y-2 text-center md:text-left">
+        <h1 class="text-3xl font-extrabold font-mono tracking-widest text-hermes-cream flex items-center justify-center md:justify-start gap-3">
+          <span class="border border-hermes-cream px-2 py-0.5">P</span>
+          PORT DASHBOARD
+        </h1>
+        <p class="text-xs text-hermes-accent font-mono uppercase tracking-widest">使用、开发与跨平台部署指南手册</p>
+      </div>
+      <a href="http://localhost:9229/" target="_blank" class="bg-hermes-cream hover:bg-white text-hermes-teal font-bold px-6 py-3 font-mono text-sm shadow-xl transition-all border border-hermes-cream/20">
+        进入控制中心网页 ↗
+      </a>
+    </header>
+
+    <!-- 主体目录 -->
+    <main class="space-y-8">
+      
+      <!-- 项目概述 -->
+      <section class="retro-border bg-hermes-card/40 p-6 md:p-8 rounded space-y-4">
+        <h2 class="text-lg font-bold font-mono text-hermes-cream border-b border-hermes-cream/10 pb-2 flex items-center gap-2">
+          <span class="text-hermes-accent">01.</span> 项目概述 / OVERVIEW
+        </h2>
+        <p class="text-sm text-hermes-dimmed leading-relaxed">
+          <code>PORT DASHBOARD</code> 是一个专为网页应用开发者（尤其是 WSL 虚拟化环境）设计的一站式**本地端口与生命周期代理控制台**。
+          当我们在本地并行开发多个网页项目时，由于终端杂乱、端口易冲突且难以管理其子进程释放，开发工作往往会在频繁开闭进程中变得繁琐。
+          本产品在致敬经典赛博复古终端美学的同时，完美实现了一键代理、全方位端口扫描、实时抓取后台控制台日志以及一键物理强杀进程的功能。
+        </p>
+      </section>
+
+      <!-- 核心功能结构 -->
+      <section class="retro-border bg-hermes-card/40 p-6 md:p-8 rounded space-y-4">
+        <h2 class="text-lg font-bold font-mono text-hermes-cream border-b border-hermes-cream/10 pb-2 flex items-center gap-2">
+          <span class="text-hermes-accent">02.</span> 核心高能功能 / FEATURES
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+          <div class="border border-hermes-cream/5 bg-black/35 p-4 rounded space-y-2">
+            <h3 class="text-hermes-cream font-bold text-sm">🎛️ 项目一键生命周期托管</h3>
+            <p class="text-hermes-dimmed leading-relaxed">支持创建和保存您的个人网页（Vite/Webpack/FastAPI 等）。点击【启动】直接在后台开始代理，点击【关闭】直接通过 Linux 进程组（PGID）将主、子进程清理得干干净净，100% 解决 WSL 端口残留和死锁问题。</p>
+          </div>
+          <div class="border border-hermes-cream/5 bg-black/35 p-4 rounded space-y-2">
+            <h3 class="text-hermes-cream font-bold text-sm">🎙️ 实时 CRT 日志终端投射</h3>
+            <p class="text-hermes-dimmed leading-relaxed">后端自动管道化捕获代理进程的 <code>stdout/stderr</code>。在网页中点击【日志】即可立刻建立实时监听，自动向下翻滚，不遗漏任何报错堆栈和请求日志。</p>
+          </div>
+          <div class="border border-hermes-cream/5 bg-black/35 p-4 rounded space-y-2">
+            <h3 class="text-hermes-cream font-bold text-sm">⚡ 全局 TCP 端口多维扫描</h3>
+            <p class="text-hermes-dimmed leading-relaxed">实时轮询扫描 WSL 内核的所有 TCP 端口。详细展示绑定地址、宿主进程名及系统 PID。对于意外死锁或外部进程，可直接一键强杀（SIGKILL），或一键导入托管配置列表。</p>
+          </div>
+          <div class="border border-hermes-cream/5 bg-black/35 p-4 rounded space-y-2">
+            <h3 class="text-hermes-cream font-bold text-sm">📈 主机核心健康度监测</h3>
+            <p class="text-hermes-dimmed leading-relaxed">内置极轻量级、无依赖的 <code>/proc/stat</code> 与 <code>/proc/meminfo</code> 文件读取模块，精准反馈当前的 CPU 占用百分比、RAM 内存用量以及控制中心的系统运行时间（Uptime）。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 部署与启动说明 -->
+      <section class="retro-border bg-hermes-card/40 p-6 md:p-8 rounded space-y-6">
+        <h2 class="text-lg font-bold font-mono text-hermes-cream border-b border-hermes-cream/10 pb-2 flex items-center gap-2">
+          <span class="text-hermes-accent">03.</span> 部署与启动指南 / DEPLOYMENT GUIDE
+        </h2>
+        
+        <div class="space-y-4">
+          <h3 class="text-sm font-bold text-hermes-cream font-mono">A. 本地标准直接启动 (WSL 内部)</h3>
+          <p class="text-xs text-hermes-dimmed leading-relaxed">
+            控制中心依赖 <code>FastAPI</code> 与 <code>Uvicorn</code> 网络组件。我们提供了一个自适应环境检查脚本 <code>start.sh</code>，它会自动检测你本地是否有合适且安装了依赖的 Python 环境（若没有会自动建立依赖），并提示访问地址。
+          </p>
+          <pre><code># 进入工作目录并赋权启动
+cd /mnt/g/AITOOLS/mydashboard
+chmod +x start.sh
+./start.sh</code></pre>
+        </div>
+
+        <div class="space-y-4 pt-2">
+          <h3 class="text-sm font-bold text-hermes-cream font-mono">B. 宿主机 (Windows 浏览器) 联通配置</h3>
+          <p class="text-xs text-hermes-dimmed leading-relaxed">
+            由于 WSL2 采用的是轻量级 Hyper-V 虚拟机网卡，其内部 IP 地址与 Windows 宿主机是不完全等同的。虽然 <code>localhost:9229</code> 默认可用（WSL2 内置了 localhost 映射），但在其他同局域网设备（如手机或其他 Windows 电脑）要访问时，需要使用 WSL 内部 IP。
+          </p>
+          <ul class="list-decimal list-inside text-xs text-hermes-dimmed space-y-1.5 leading-relaxed pl-2 font-mono">
+            <li>运行 <code>./start.sh</code> 时，屏幕上会高亮显示形如 <code>http://100.119.171.91:9229/</code> 的局域网网卡 IP。</li>
+            <li>在宿主机 Windows 浏览器中，直接用该 IP 打开，速度会更加顺畅且稳定。</li>
+          </ul>
+        </div>
+
+        <div class="space-y-4 pt-2">
+          <h3 class="text-sm font-bold text-hermes-cream font-mono">C. 开机自动后台无头运行部署 (Linux / Systemd)</h3>
+          <p class="text-xs text-hermes-dimmed leading-relaxed">
+            如果您希望这个端口控制中心能够像系统级软件一样，在 WSL 每次开机时自动在后台默默运行，您可以通过两种方式进行部署：
+          </p>
+          
+          <div class="space-y-3 pl-2">
+            <h4 class="text-xs font-bold text-hermes-accent font-mono">方法一：使用 PM2 极简后台托管 (推荐)</h4>
+            <p class="text-xs text-hermes-dimmed leading-relaxed">如果你的 WSL 中安装了 Nodejs 带有 pm2，这是最优雅的后台守护方式：</p>
+            <pre><code># 使用 pm2 守护 python 后台，并命名为 my-dashboard
+pm2 start app.py --name "my-dashboard" --interpreter python3
+pm2 save</code></pre>
+            
+            <h4 class="text-xs font-bold text-hermes-accent font-mono">方法二：配置 Linux Systemd 系统服务守护</h4>
+            <p class="text-xs text-hermes-dimmed leading-relaxed">在 WSL 的 Ubuntu 实例中（确保 WSL 开启了 systemd 选项），您可以创建一个系统服务文件 <code>/etc/systemd/system/mydashboard.service</code>：</p>
+            <pre><code>[Unit]
+Description=My App Port Control Console
+After=network.target
+
+[Service]
+Type=simple
+User=yaopc
+WorkingDirectory=/mnt/g/AITOOLS/mydashboard
+ExecStart=/home/yaopc/.hermes/hermes-agent/venv/bin/python3 app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+            <p class="text-xs text-hermes-dimmed leading-relaxed">配置完后，执行以下命令使服务生效，即可完成开机自启：</p>
+            <pre><code>sudo systemctl daemon-reload
+sudo systemctl enable mydashboard
+sudo systemctl start mydashboard</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- 托管网页教程 -->
+      <section class="retro-border bg-hermes-card/40 p-6 md:p-8 rounded space-y-4">
+        <h2 class="text-lg font-bold font-mono text-hermes-cream border-b border-hermes-cream/10 pb-2 flex items-center gap-2">
+          <span class="text-hermes-accent">04.</span> 托管我自己的网页与项目 / TUTORIAL
+        </h2>
+        <p class="text-xs text-hermes-dimmed leading-relaxed">
+          非常简单，只需在仪表盘中点击【新增托管项目】输入对应的配制：
+        </p>
+        <ol class="list-decimal list-inside text-xs text-hermes-dimmed space-y-2 pl-2 leading-relaxed font-mono">
+          <li><strong>唯一标识 (ID)</strong>：填写不易重复的英文代号，例如 <code>my-vite-web</code>。</li>
+          <li><strong>项目名称</strong>：在卡片和日志标题上显示的中文名，例如 <code>我的个人主页前端</code>。</li>
+          <li><strong>工作目录绝对路径 (CWD)</strong>：程序启动所在的文件夹目录，例如 <code>/mnt/g/MyProjects/MyBlog</code>。</li>
+          <li><strong>启动指令 (CMD)</strong>：你在命令行平时启动这个项目的命令，例如 <code>npm run dev</code> 或 <code>python3 server.py</code>。</li>
+          <li><strong>运行端口 (Port)</strong>：项目启动成功后会占用的本地 TCP 端口号，例如 <code>5173</code> 或 <code>8080</code>。</li>
+        </ol>
+        <p class="text-xs text-hermes-accent leading-relaxed font-mono mt-2">
+          💡 【神级便利】如果你发现某个端口已经在左侧“全局端口”表格里显示为活动状态了，你甚至可以直接点击它右侧的【导入托管】按钮，控制台会自动帮你预填好所有的表单，你只需要填一个项目名字并保存就可以成功绑定了！
+        </p>
+      </section>
+
+      <!-- 部署结构 -->
+      <section class="retro-border bg-hermes-card/40 p-6 md:p-8 rounded space-y-4">
+        <h2 class="text-lg font-bold font-mono text-hermes-cream border-b border-hermes-cream/10 pb-2 flex items-center gap-2">
+          <span class="text-hermes-accent">05.</span> 代码仓库结构说明 / ARCHITECTURE
+        </h2>
+        <pre class="text-xs font-mono"><code>mydashboard/
+├── app.py              # FastAPI 核心后端 (系统指标统计、ss端口进程提取、进程树级控制 API)
+├── start.sh            # 自适应 Python 环境寻址与亮色多色打印自启脚本
+├── projects.json       # 项目托管配置数据文件 (JSON 格式)
+├── running_pids.json   # 缓存运行中 PID，确保控制台崩溃重启后依然可找回托管
+├── README.html         # HTML 版极帅官方说明手册 (本文件)
+├── README.md           # 简洁版 Markdown 文档
+├── templates/
+│   └── index.html      # 核心 UI 网页 (Vue 3 渲染、Tailwind CSS样式库、实时控制台轮询模块)
+└── logs/
+    └── *.log           # 各个托管网页的实时运行控制台管道重定向日志</code></pre>
+      </section>
+
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="text-center font-mono text-[10px] text-hermes-dimmed border-t border-hermes-cream/10 pt-6 pb-12">
+      <p>PORT DASHBOARD • DEVELOPED AND POWERED FOR WSL LOCAL WEB ENGINES</p>
+      <p class="mt-1">STYLISH METALLIC TEAL & GOLDEN GLOW GRAPHICS THEME • PROUDLY POWERED BY HERMES AGENT</p>
+    </footer>
+
+  </div>
+</body>
+</html>

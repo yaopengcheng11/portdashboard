@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PORT DASHBOARD - 本地网页与应用端口控制中心</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    /* Custom style definitions based on Hermes official dashboard aesthetics */
+    :root {
+      --background: #041c1c;
+      --midground: #ffe6cb;
+      --glow-color: rgba(255, 189, 56, 0.35);
+      --card-bg: #062a2a;
+      --card-border: rgba(255, 230, 203, 0.15);
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+
+    body {
+      background-color: var(--background);
+      color: var(--midground);
+      font-family: var(--font-sans);
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Noise and scanlines overlay for retro-futuristic terminal aesthetic */
+    .crt-overlay::after {
+      content: " ";
+      display: block;
+      position: fixed;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                  linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      background-size: 100% 4px, 6px 100%;
+      z-index: 99999;
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    /* Ambient glow */
+    .ambient-glow {
+      position: fixed;
+      top: 10%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80vw;
+      height: 40vh;
+      background: radial-gradient(circle, var(--glow-color) 0%, rgba(4, 28, 28, 0) 70%);
+      z-index: -1;
+      opacity: 0.6;
+      pointer-events: none;
+    }
+
+    /* Custom scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(4, 28, 28, 0.5);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 230, 203, 0.3);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 230, 203, 0.6);
+    }
+
+    .retro-border {
+      border: 1px solid var(--card-border);
+      box-shadow: 0 0 15px rgba(255, 189, 56, 0.05);
+      transition: all 0.3s ease;
+    }
+    .retro-border:hover {
+      border-color: rgba(255, 230, 203, 0.4);
+      box-shadow: 0 0 20px rgba(255, 189, 56, 0.15);
+    }
+    
+    .glow-active {
+      border-color: var(--midground);
+      box-shadow: 0 0 25px rgba(255, 189, 56, 0.25);
+    }
+
+    .glow-led {
+      position: relative;
+    }
+    .glow-led::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 9999px;
+      width: 100%;
+      height: 100%;
+      opacity: 0.6;
+      filter: blur(4px);
+      z-index: -1;
+    }
+
+    .terminal-output {
+      font-family: var(--font-mono);
+      background-color: #010a0a;
+      border: 1px solid rgba(255, 230, 203, 0.2);
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            hermes: {
+              teal: '#041c1c',
+              cream: '#ffe6cb',
+              accent: '#ffbd38',
+              card: '#062a2a',
+              dimmed: '#a59381'
+            }
+          },
+          fontFamily: {
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+            sans: ['system-ui', '-apple-system', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="h-full crt-overlay">
+  <div class="ambient-glow"></div>
+
+  <div id="app" class="flex flex-col h-full max-h-screen relative z-10 p-4 md:p-6 select-none" v-cloak>
+    
+    <!-- 顶部标题栏 -->
+    <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-hermes-cream/20 pb-4 mb-6">
+      <div class="flex items-center space-x-4 mb-4 md:mb-0">
+        <!-- SVG Logo (Retro geometric style like Hermes) -->
+        <div class="w-12 h-12 flex items-center justify-center border-2 border-hermes-cream relative glow-active">
+          <span class="font-bold text-xl text-hermes-cream font-mono">P</span>
+          <div class="absolute -top-1 -left-1 w-2 h-2 bg-hermes-accent"></div>
+          <div class="absolute -bottom-1 -right-1 w-2 h-2 bg-hermes-accent"></div>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold font-mono tracking-wider text-hermes-cream flex items-center gap-2">
+            PORT DASHBOARD
+            <span class="text-xs font-normal border border-hermes-accent/40 text-hermes-accent px-1.5 py-0.5 rounded uppercase">WSL Engine</span>
+          </h1>
+          <p class="text-xs text-hermes-dimmed tracking-wide mt-1">本地服务端口及生命周期可视化控制台</p>
+        </div>
+      </div>
+      
+      <!-- WSL 状态仪表盘 -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs w-full md:w-auto font-mono">
+        <!-- IP地址 -->
+        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
+          <span class="text-hermes-dimmed">WSL IP</span>
+          <span class="text-hermes-accent font-semibold mt-0.5 flex items-center gap-1">
+            <svg class="w-3 h-3 text-hermes-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+            {{ stats.ip_address }}
+          </span>
+        </div>
+        <!-- CPU 使用率 -->
+        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
+          <div class="flex justify-between items-center text-hermes-dimmed">
+            <span>CPU 使用</span>
+            <span>{{ stats.cpu_percent }}%</span>
+          </div>
+          <div class="w-24 bg-hermes-teal/80 h-1.5 rounded-full overflow-hidden mt-1.5 border border-hermes-cream/10">
+            <div class="bg-hermes-accent h-full transition-all duration-300" :style="{ width: stats.cpu_percent + '%' }"></div>
+          </div>
+        </div>
+        <!-- 内存使用率 -->
+        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
+          <div class="flex justify-between items-center text-hermes-dimmed">
+            <span>内存使用</span>
+            <span>{{ stats.memory ? stats.memory.percent : 0 }}%</span>
+          </div>
+          <div class="w-24 bg-hermes-teal/80 h-1.5 rounded-full overflow-hidden mt-1.5 border border-hermes-cream/10">
+            <div class="bg-hermes-accent h-full transition-all duration-300" :style="{ width: (stats.memory ? stats.memory.percent : 0) + '%' }"></div>
+          </div>
+        </div>
+        <!-- 系统运行时间 -->
+        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
+          <span class="text-hermes-dimmed">控制中心 UPTIME</span>
+          <span class="text-hermes-cream font-semibold mt-0.5">{{ stats.uptime || '0s' }}</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主要内容区：分左右布局 -->
+    <main class="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 overflow-hidden">
+      
+      <!-- 导航和左侧托管服务 (8 col on XL) -->
+      <section class="xl:col-span-8 flex flex-col h-full overflow-hidden">
+        
+        <!-- 切换 Tab 按钮 -->
+        <div class="flex space-x-2 border-b border-hermes-cream/10 pb-3 mb-4">
+          <button 
+            @click="activeTab = 'managed'" 
+            :class="[activeTab === 'managed' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
+            class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
+          >
+            ┊ 托管项目 ({{ projects.length }})
+          </button>
+          <button 
+            @click="activeTab = 'system'" 
+            :class="[activeTab === 'system' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
+            class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
+          >
+            ┊ 全局端口 ({{ systemPorts.length }})
+          </button>
+        </div>
+
+        <!-- 托管服务面板 -->
+        <div v-if="activeTab === 'managed'" class="flex-1 flex flex-col overflow-hidden">
+          
+          <!-- 操作与提示栏 -->
+          <div class="flex justify-between items-center mb-4">
+            <p class="text-xs text-hermes-dimmed font-mono">
+              在这里注册并托管您的网页项目，轻松实现 WSL 环境下一键快捷启闭
+            </p>
+            <button 
+              @click="openAddProjectModal()" 
+              class="bg-hermes-accent text-hermes-teal font-semibold hover:bg-hermes-cream transition-all px-3 py-1.5 text-xs font-mono flex items-center gap-1.5 shadow-lg border border-hermes-cream/20"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+              新增托管项目
+            </button>
+          </div>
+
+          <!-- 托管服务列表 -->
+          <div class="flex-1 overflow-y-auto pr-1 space-y-4">
+            
+            <!-- 空状态 -->
+            <div v-if="projects.length === 0" class="retro-border bg-hermes-card/30 p-12 text-center rounded flex flex-col items-center justify-center">
+              <svg class="w-12 h-12 text-hermes-dimmed/40 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+              <h3 class="font-mono text-base font-semibold text-hermes-cream">暂无托管项目</h3>
+              <p class="text-xs text-hermes-dimmed mt-2 max-w-sm">您还没有创建任何托管项目。您可以点击上方按钮手动创建，或者在“全局端口”中直接将已运行的项目一键导入托管。</p>
+            </div>
+
+            <!-- 项目卡片 Grid -->
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div 
+                v-for="proj in projects" 
+                :key="proj.id" 
+                :class="[proj.status === 'running' ? 'border-hermes-accent/40 bg-hermes-card/80 shadow-[0_0_15px_rgba(255,189,56,0.08)]' : 'border-hermes-cream/10 bg-hermes-card/30']"
+                class="retro-border p-4 rounded relative overflow-hidden flex flex-col justify-between"
+              >
+                <!-- 卡片顶部：服务名与运行指示器 -->
+                <div class="mb-3">
+                  <div class="flex justify-between items-start">
+                    <div class="flex items-center space-x-2">
+                      <!-- 状态呼吸灯 LED -->
+                      <span class="relative flex h-2.5 w-2.5">
+                        <span 
+                          :class="[proj.status === 'running' ? 'bg-emerald-400 animate-ping' : 'bg-stone-500']"
+                          class="absolute inline-flex h-full w-full rounded-full opacity-75"
+                        ></span>
+                        <span 
+                          :class="[proj.status === 'running' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-stone-600']"
+                          class="relative inline-flex rounded-full h-2.5 w-2.5"
+                        ></span>
+                      </span>
+                      <h4 class="font-mono font-bold text-hermes-cream text-base tracking-wide">{{ proj.name }}</h4>
+                    </div>
+                    <!-- 端口标签 -->
+                    <span class="font-mono text-xs px-2 py-0.5 bg-hermes-teal border border-hermes-cream/20 text-hermes-cream rounded">
+                      PORT: <strong class="text-hermes-accent font-bold">{{ proj.port }}</strong>
+                    </span>
+                  </div>
+                  <p class="text-xs text-hermes-dimmed mt-1.5 h-8 line-clamp-2 overflow-hidden">{{ proj.description || '暂无项目说明' }}</p>
+                </div>
+
+                <!-- 卡片中部：路径与启动命令 -->
+                <div class="space-y-1.5 bg-black/40 p-2.5 rounded border border-hermes-cream/5 font-mono text-xs text-hermes-dimmed mb-4">
+                  <div class="flex items-start gap-1 overflow-hidden">
+                    <span class="text-hermes-accent shrink-0">CWD:</span>
+                    <span class="truncate" :title="proj.cwd">{{ proj.cwd }}</span>
+                  </div>
+                  <div class="flex items-start gap-1 overflow-hidden">
+                    <span class="text-hermes-accent shrink-0">CMD:</span>
+                    <span class="truncate text-hermes-cream" :title="proj.command">{{ proj.command }}</span>
+                  </div>
+                  <div class="flex justify-between text-[10px] text-hermes-dimmed border-t border-hermes-cream/5 pt-1 mt-1">
+                    <span>所有者: <strong class="text-hermes-cream">{{ proj.owner }}</strong></span>
+                    <span v-if="proj.pid">PID: <strong class="text-hermes-accent">{{ proj.pid }}</strong></span>
+                  </div>
+                </div>
+
+                <!-- 卡片底部：操作控制区 -->
+                <div class="flex gap-2 text-xs pt-1 border-t border-hermes-cream/10">
+                  <!-- 启闭控制 -->
+                  <button 
+                    v-if="proj.status !== 'running'" 
+                    @click="startProject(proj.id)"
+                    :disabled="loadingStates[proj.id]"
+                    class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span v-if="loadingStates[proj.id]">正在启动...</span>
+                    <template v-else>
+                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      启动
+                    </template>
+                  </button>
+                  <button 
+                    v-else 
+                    @click="stopProject(proj.id)"
+                    :disabled="loadingStates[proj.id]"
+                    class="flex-1 bg-rose-700 hover:bg-rose-600 text-white font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(244,63,94,0.15)]"
+                  >
+                    <span v-if="loadingStates[proj.id]">正在停止...</span>
+                    <template v-else>
+                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                      关闭
+                    </template>
+                  </button>
+
+                  <!-- 实时日志 -->
+                  <button 
+                    @click="openLogsPanel(proj)"
+                    class="bg-hermes-teal hover:bg-hermes-card border border-hermes-cream/30 hover:border-hermes-cream text-hermes-cream font-mono px-3 py-1.5 rounded transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    日志
+                  </button>
+
+                  <!-- 编辑配置 -->
+                  <button 
+                    @click="openEditProjectModal(proj)"
+                    class="bg-hermes-teal hover:bg-hermes-card border border-hermes-cream/30 hover:border-hermes-cream text-hermes-cream font-mono p-1.5 rounded transition-all cursor-pointer"
+                    title="编辑项目配置"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                  </button>
+
+                  <!-- 删除项目 -->
+                  <button 
+                    @click="deleteProject(proj)"
+                    class="bg-hermes-teal hover:bg-rose-950/40 border border-hermes-cream/10 hover:border-rose-800 text-hermes-dimmed hover:text-rose-400 font-mono p-1.5 rounded transition-all cursor-pointer"
+                    title="删除托管"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 全局端口面板 -->
+        <div v-if="activeTab === 'system'" class="flex-1 flex flex-col overflow-hidden">
+          
+          <div class="flex justify-between items-center mb-4 font-mono text-xs">
+            <span class="text-hermes-dimmed">实时扫描 WSL 实例内当前处于 LISTEN (监听) 状态的所有 TCP 端口进程</span>
+            <button 
+              @click="fetchSystemPorts()" 
+              class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 15H17.5"></path></svg>
+              刷新扫描
+            </button>
+          </div>
+
+          <!-- 系统端口列表表格 -->
+          <div class="flex-1 overflow-y-auto border border-hermes-cream/10 rounded bg-hermes-card/20">
+            <table class="w-full text-left font-mono text-xs border-collapse">
+              <thead>
+                <tr class="border-b border-hermes-cream/15 bg-hermes-card/80 sticky top-0 z-10 text-hermes-cream">
+                  <th class="p-3">端口</th>
+                  <th class="p-3">绑定地址</th>
+                  <th class="p-3">运行进程</th>
+                  <th class="p-3">PID</th>
+                  <th class="p-3 text-right">控制操作</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-hermes-cream/5">
+                <tr v-if="systemPorts.length === 0">
+                  <td colspan="5" class="p-8 text-center text-hermes-dimmed">未检测到任何正在监听的 TCP 端口服务</td>
+                </tr>
+                <tr 
+                  v-for="port in systemPorts" 
+                  :key="port.port" 
+                  class="hover:bg-hermes-card/50 transition-all"
+                  :class="[isPortManaged(port.port) ? 'bg-hermes-card/30 text-hermes-accent' : 'text-hermes-cream/90']"
+                >
+                  <!-- 端口 -->
+                  <td class="p-3 font-semibold text-sm">
+                    <span class="text-hermes-accent">#</span> {{ port.port }}
+                  </td>
+                  <!-- 地址 -->
+                  <td class="p-3 text-hermes-dimmed">{{ port.address }}</td>
+                  <!-- 进程名 -->
+                  <td class="p-3">
+                    <span 
+                      :class="[port.process !== 'Unknown' ? 'text-hermes-cream font-medium' : 'text-hermes-dimmed italic']"
+                    >
+                      {{ port.process }}
+                    </span>
+                    <!-- 托管标签 -->
+                    <span 
+                      v-if="isPortManaged(port.port)" 
+                      class="ml-2 text-[10px] bg-hermes-accent/25 text-hermes-accent border border-hermes-accent/40 px-1 py-0.2 rounded"
+                    >
+                      DASHBOARD 托管中
+                    </span>
+                  </td>
+                  <!-- PID -->
+                  <td class="p-3">{{ port.pid || '--' }}</td>
+                  <!-- 操作 -->
+                  <td class="p-3 text-right flex justify-end space-x-2">
+                    <!-- 导入托管按钮 -->
+                    <button 
+                      v-if="!isPortManaged(port.port)"
+                      @click="quickImportPort(port)"
+                      class="bg-hermes-card hover:bg-hermes-cream hover:text-hermes-teal text-hermes-cream border border-hermes-cream/20 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
+                    >
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                      导入托管
+                    </button>
+                    <!-- 强杀进程按钮 -->
+                    <button 
+                      v-if="port.pid"
+                      @click="killProcess(port.pid, port.port)"
+                      class="bg-rose-950/30 border border-rose-900 hover:bg-rose-900 text-rose-200 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
+                    >
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                      强杀
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- 右侧：实时日志监视控制终端 (4 col on XL) -->
+      <section class="xl:col-span-4 flex flex-col h-full overflow-hidden">
+        
+        <div class="retro-border bg-hermes-card/40 flex-1 flex flex-col overflow-hidden rounded relative">
+          
+          <!-- 面板头部 -->
+          <div class="border-b border-hermes-cream/15 p-3 flex justify-between items-center bg-hermes-card/80 sticky top-0 z-10 font-mono text-xs">
+            <span class="text-hermes-cream flex items-center gap-1.5 font-bold">
+              <span class="w-2 h-2 rounded-full bg-hermes-accent animate-pulse"></span>
+              ┊ 实时控制台输出
+            </span>
+            <div class="flex items-center space-x-2">
+              <!-- 清除控制台按钮 -->
+              <button 
+                v-if="activeLogProject"
+                @click="clearLogs()" 
+                class="text-hermes-dimmed hover:text-hermes-cream p-1 rounded transition-all"
+                title="清空控制台日志文件"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+              </button>
+              <button 
+                v-if="activeLogProject"
+                @click="copyLogs()" 
+                class="text-hermes-dimmed hover:text-hermes-cream p-1 rounded transition-all"
+                title="拷贝全部日志"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 日志内容容器 -->
+          <div class="flex-1 flex flex-col justify-between overflow-hidden bg-black p-4 font-mono text-xs select-text">
+            
+            <!-- 激活的项目提示 -->
+            <div v-if="activeLogProject" class="text-hermes-accent border-b border-hermes-cream/10 pb-2 mb-3 shrink-0 flex justify-between items-center">
+              <span>ACTIVE MONITOR: {{ activeLogProject.name }} (PORT {{ activeLogProject.port }})</span>
+              <button 
+                @click="closeLogsPanel()" 
+                class="text-[10px] hover:text-white border border-hermes-accent/40 hover:border-white px-1.5 py-0.2 rounded transition-all cursor-pointer"
+              >
+                关闭监听
+              </button>
+            </div>
+
+            <!-- 终端日志框 -->
+            <div 
+              ref="terminalBox" 
+              class="flex-1 overflow-y-auto space-y-1 terminal-output rounded p-3 text-emerald-400 select-text relative"
+            >
+              <!-- 无活动日志空状态 -->
+              <div v-if="!activeLogProject" class="absolute inset-0 flex flex-col items-center justify-center text-center text-hermes-dimmed/60 p-6 select-none">
+                <svg class="w-10 h-10 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                <p>未连接到任何项目控制台</p>
+                <p class="text-[10px] mt-1 text-hermes-dimmed/40">点击托管服务卡片上的“日志”按钮以获取实时日志流</p>
+              </div>
+
+              <!-- 渲染日志文本 -->
+              <pre v-else class="whitespace-pre-wrap font-mono break-all text-[11px] leading-relaxed select-text">{{ logContent }}</pre>
+            </div>
+
+            <!-- 控制流 -->
+            <div v-if="activeLogProject" class="mt-3 pt-2 border-t border-hermes-cream/10 shrink-0 flex justify-between items-center text-hermes-dimmed text-[10px] select-none">
+              <span class="flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                自动滚动已激活
+              </span>
+              <span>行数限值: 200 行</span>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- 弹窗：新增/修改托管项目配置 -->
+    <div 
+      v-if="showProjectModal" 
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+    >
+      <div class="retro-border glow-active bg-hermes-teal w-full max-w-lg rounded-md overflow-hidden flex flex-col shadow-2xl">
+        <!-- 弹窗头 -->
+        <div class="border-b border-hermes-cream/20 bg-hermes-card/90 px-5 py-4 flex justify-between items-center font-mono">
+          <h3 class="text-base font-bold text-hermes-cream tracking-wide">
+            {{ isEditing ? '编辑托管项目配置' : '新增项目至托管控制' }}
+          </h3>
+          <button @click="showProjectModal = false" class="text-hermes-dimmed hover:text-white cursor-pointer text-lg">×</button>
+        </div>
+        
+        <!-- 弹窗表单 -->
+        <form @submit.prevent="saveProject" class="p-5 space-y-4 text-xs font-mono">
+          
+          <!-- 项目唯一ID (只在创建时随机生成, 编辑时禁用) -->
+          <div>
+            <label class="block text-hermes-dimmed mb-1.5">唯一标识 (Project ID)</label>
+            <input 
+              v-model="form.id" 
+              type="text" 
+              required 
+              :disabled="isEditing"
+              placeholder="e.g. my-vite-app"
+              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all disabled:opacity-50"
+            >
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- 项目名称 -->
+            <div class="md:col-span-2">
+              <label class="block text-hermes-dimmed mb-1.5">项目名称 (Name)</label>
+              <input 
+                v-model="form.name" 
+                type="text" 
+                required 
+                placeholder="e.g. 个人主页前端"
+                class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
+              >
+            </div>
+            <!-- 运行端口 -->
+            <div>
+              <label class="block text-hermes-dimmed mb-1.5">运行端口 (Port)</label>
+              <input 
+                v-model.number="form.port" 
+                type="number" 
+                required 
+                min="1" 
+                max="65535"
+                placeholder="e.g. 3000"
+                class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
+              >
+            </div>
+          </div>
+
+          <!-- 工作目录 -->
+          <div>
+            <label class="block text-hermes-dimmed mb-1.5">工作目录绝对路径 (Working Directory)</label>
+            <input 
+              v-model="form.cwd" 
+              type="text" 
+              required 
+              placeholder="e.g. /mnt/g/AITOOLS/mydashboard"
+              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
+            >
+            <p class="text-[10px] text-hermes-dimmed/70 mt-1">
+              Linux 目录路径。例如：WSL 本地 G 盘挂载路径为 /mnt/g/... 宿主机用户主目录为 /home/yaopc
+            </p>
+          </div>
+
+          <!-- 启动指令 -->
+          <div>
+            <label class="block text-hermes-dimmed mb-1.5">启动指令 (Start Command)</label>
+            <input 
+              v-model="form.command" 
+              type="text" 
+              required 
+              placeholder="e.g. python3 app.py 或 npm run dev"
+              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
+            >
+          </div>
+
+          <!-- 项目说明 -->
+          <div>
+            <label class="block text-hermes-dimmed mb-1.5">项目备注说明 (Description)</label>
+            <textarea 
+              v-model="form.description" 
+              rows="2"
+              placeholder="可选填，用于简要描述该网页或项目..."
+              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all resize-none"
+            ></textarea>
+          </div>
+
+          <!-- 按钮控制 -->
+          <div class="flex justify-end space-x-3 pt-3 border-t border-hermes-cream/10">
+            <button 
+              type="button" 
+              @click="showProjectModal = false"
+              class="border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10 text-hermes-cream px-4 py-2 font-semibold transition-all cursor-pointer"
+            >
+              取消
+            </button>
+            <button 
+              type="submit" 
+              class="bg-hermes-cream hover:bg-white text-hermes-teal font-bold px-5 py-2 transition-all cursor-pointer shadow-lg"
+            >
+              保存配置
+            </button>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Vue Logic Script -->
+  <script>
+    const { createApp, ref, reactive, onMounted, onBeforeUnmount, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        // State variables
+        const activeTab = ref('managed'); // 'managed' or 'system'
+        const projects = ref([]);
+        const systemPorts = ref([]);
+        const stats = ref({});
+        const loadingStates = reactive({}); // Map project_id -> boolean (loading)
+        
+        // Log Monitor state
+        const activeLogProject = ref(null);
+        const logContent = ref('');
+        const terminalBox = ref(null);
+        let logIntervalId = null;
+
+        // Add/Edit Project Form state
+        const showProjectModal = ref(false);
+        const isEditing = ref(false);
+        const form = reactive({
+          id: '',
+          name: '',
+          cwd: '',
+          command: '',
+          port: '',
+          description: ''
+        });
+
+        // Global intervals
+        let statsIntervalId = null;
+        let portsIntervalId = null;
+
+        // Fetch System Stats (CPU, Mem, IP, Uptime)
+        const fetchSystemStats = async () => {
+          try {
+            const res = await fetch('/api/system/stats');
+            if (res.ok) {
+              stats.value = await res.json();
+            }
+          } catch (e) {
+            console.error("Error fetching stats:", e);
+          }
+        };
+
+        // Fetch System active listen ports
+        const fetchSystemPorts = async () => {
+          try {
+            const res = await fetch('/api/system/ports');
+            if (res.ok) {
+              systemPorts.value = await res.json();
+            }
+          } catch (e) {
+            console.error("Error scanning system ports:", e);
+          }
+        };
+
+        // Fetch Projects list from backend
+        const fetchProjects = async () => {
+          try {
+            const res = await fetch('/api/projects');
+            if (res.ok) {
+              projects.value = await res.json();
+              
+              // If we are currently monitoring a project, keep its active info updated
+              if (activeLogProject.value) {
+                const current = projects.value.find(p => p.id === activeLogProject.value.id);
+                if (current) {
+                  activeLogProject.value = current;
+                }
+              }
+            }
+          } catch (e) {
+            console.error("Error fetching projects list:", e);
+          }
+        };
+
+        // Check if port is managed by existing projects list
+        const isPortManaged = (port) => {
+          return projects.value.some(p => p.port === port);
+        };
+
+        // Quick kill process by PID
+        const killProcess = async (pid, port) => {
+          if (!confirm(`确认要强杀 PID ${pid} (运行于端口 ${port}) 进程及其子进程吗？`)) {
+            return;
+          }
+          try {
+            const res = await fetch(`/api/system/ports/kill/${pid}`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok && data.success) {
+              alert(data.message || '进程终止成功！');
+              fetchSystemPorts();
+              fetchProjects();
+            } else {
+              alert(`强杀失败: ${data.detail || '未知错误'}`);
+            }
+          } catch (e) {
+            alert(`强杀失败: ${e.message}`);
+          }
+        };
+
+        // Quick import port to managed list
+        const quickImportPort = (portObj) => {
+          isEditing.value = false;
+          form.id = `port-${portObj.port}-${Date.now().toString().slice(-4)}`;
+          form.name = `${portObj.process === 'Unknown' ? '本地网页服务' : portObj.process}-${portObj.port}`;
+          form.port = portObj.port;
+          form.cwd = '/mnt/g/AITOOLS/mydashboard'; // Default fallback
+          form.command = portObj.process !== 'Unknown' ? `${portObj.process}` : 'node server.js';
+          form.description = `自全局扫描中导入的端口 ${portObj.port} 进程服务`;
+          showProjectModal.value = true;
+        };
+
+        // Open Modal to Add Project
+        const openAddProjectModal = () => {
+          isEditing.value = false;
+          form.id = `project-${Date.now().toString().slice(-4)}`;
+          form.name = '';
+          form.cwd = '/mnt/g/AITOOLS/mydashboard';
+          form.command = '';
+          form.port = '';
+          form.description = '';
+          showProjectModal.value = true;
+        };
+
+        // Open Modal to Edit Project
+        const openEditProjectModal = (proj) => {
+          isEditing.value = true;
+          form.id = proj.id;
+          form.name = proj.name;
+          form.cwd = proj.cwd;
+          form.command = proj.command;
+          form.port = proj.port;
+          form.description = proj.description;
+          showProjectModal.value = true;
+        };
+
+        // Save Project (Add or Edit)
+        const saveProject = async () => {
+          if (!form.id || !form.name || !form.cwd || !form.command || !form.port) {
+            alert('请完整填写所有必填字段！');
+            return;
+          }
+          
+          try {
+            const method = isEditing.value ? 'PUT' : 'POST';
+            const url = isEditing.value ? `/api/projects/${form.id}` : '/api/projects';
+            
+            const res = await fetch(url, {
+              method: method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...form })
+            });
+            
+            if (res.ok) {
+              showProjectModal.value = false;
+              fetchProjects();
+            } else {
+              const err = await res.json();
+              alert(`保存失败: ${err.detail || '未知错误'}`);
+            }
+          } catch (e) {
+            alert(`保存失败: ${e.message}`);
+          }
+        };
+
+        // Delete Project from list
+        const deleteProject = async (proj) => {
+          if (!confirm(`确认要将项目 “${proj.name}” 自托管控制中心删除吗？（注意：如果服务正在运行，删除时也会强行关闭服务）`)) {
+            return;
+          }
+          
+          try {
+            const res = await fetch(`/api/projects/${proj.id}`, { method: 'DELETE' });
+            if (res.ok) {
+              if (activeLogProject.value && activeLogProject.value.id === proj.id) {
+                closeLogsPanel();
+              }
+              fetchProjects();
+              fetchSystemPorts();
+            } else {
+              const err = await res.json();
+              alert(`删除失败: ${err.detail || '未知错误'}`);
+            }
+          } catch (e) {
+            alert(`删除失败: ${e.message}`);
+          }
+        };
+
+        // Start Project Process
+        const startProject = async (projId) => {
+          loadingStates[projId] = true;
+          try {
+            const res = await fetch(`/api/projects/${projId}/start`, { method: 'POST' });
+            const data = await res.json();
+            
+            if (res.ok) {
+              // Automatically open and monitor logs on start
+              const proj = projects.value.find(p => p.id === projId);
+              if (proj) {
+                openLogsPanel(proj);
+              }
+              // Refresh state
+              fetchProjects();
+              fetchSystemPorts();
+            } else {
+              alert(`启动失败: ${data.detail || '未知错误'}`);
+            }
+          } catch (e) {
+            alert(`启动失败: ${e.message}`);
+          } finally {
+            loadingStates[projId] = false;
+          }
+        };
+
+        // Stop Project Process
+        const stopProject = async (projId) => {
+          loadingStates[projId] = true;
+          try {
+            const res = await fetch(`/api/projects/${projId}/stop`, { method: 'POST' });
+            const data = await res.json();
+            
+            if (res.ok) {
+              fetchProjects();
+              fetchSystemPorts();
+            } else {
+              alert(`停止失败: ${data.detail || '未知错误'}`);
+            }
+          } catch (e) {
+            alert(`停止失败: ${e.message}`);
+          } finally {
+            loadingStates[projId] = false;
+          }
+        };
+
+        // Monitor logs panel
+        const openLogsPanel = (proj) => {
+          if (logIntervalId) {
+            clearInterval(logIntervalId);
+          }
+          
+          activeLogProject.value = proj;
+          logContent.value = '正在连接日志终端并拉取缓冲输出...\n';
+          
+          // Fetch logs immediately
+          fetchLogs();
+          
+          // Poll logs every 1.5s
+          logIntervalId = setInterval(fetchLogs, 1500);
+        };
+
+        const closeLogsPanel = () => {
+          if (logIntervalId) {
+            clearInterval(logIntervalId);
+            logIntervalId = null;
+          }
+          activeLogProject.value = null;
+          logContent.value = '';
+        };
+
+        const fetchLogs = async () => {
+          if (!activeLogProject.value) return;
+          try {
+            const res = await fetch(`/api/projects/${activeLogProject.value.id}/logs`);
+            if (res.ok) {
+              const data = await res.json();
+              logContent.value = data.logs;
+              
+              // Auto scroll to bottom
+              nextTick(() => {
+                if (terminalBox.value) {
+                  terminalBox.value.scrollTop = terminalBox.value.scrollHeight;
+                }
+              });
+            }
+          } catch (e) {
+            console.error("Error polling logs:", e);
+          }
+        };
+
+        const clearLogs = async () => {
+          if (!activeLogProject.value) return;
+          try {
+            const res = await fetch(`/api/projects/${activeLogProject.value.id}/logs/clear`, { method: 'POST' });
+            if (res.ok) {
+              fetchLogs();
+            }
+          } catch (e) {
+            console.error("Error clearing logs:", e);
+          }
+        };
+
+        const copyLogs = () => {
+          if (!logContent.value) return;
+          navigator.clipboard.writeText(logContent.value)
+            .then(() => alert('日志已成功复制到系统剪切板！'))
+            .catch(err => alert('复制失败: ' + err));
+        };
+
+        // Mounted Hook
+        onMounted(() => {
+          fetchSystemStats();
+          fetchSystemPorts();
+          fetchProjects();
+
+          // Poll System Stats every 3s
+          statsIntervalId = setInterval(fetchSystemStats, 3000);
+          
+          // Poll system active listen ports every 4s
+          portsIntervalId = setInterval(fetchSystemPorts, 4000);
+        });
+
+        // Cleanup intervals
+        onBeforeUnmount(() => {
+          if (statsIntervalId) clearInterval(statsIntervalId);
+          if (portsIntervalId) clearInterval(portsIntervalId);
+          if (logIntervalId) clearInterval(logIntervalId);
+        });
+
+        return {
+          activeTab,
+          projects,
+          systemPorts,
+          stats,
+          loadingStates,
+          
+          // Logs
+          activeLogProject,
+          logContent,
+          terminalBox,
+          openLogsPanel,
+          closeLogsPanel,
+          clearLogs,
+          copyLogs,
+
+          // Actions
+          killProcess,
+          quickImportPort,
+          startProject,
+          stopProject,
+          isPortManaged,
+
+          // Modals & Form
+          showProjectModal,
+          isEditing,
+          form,
+          openAddProjectModal,
+          openEditProjectModal,
+          saveProject,
+          deleteProject,
+          fetchSystemPorts
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
