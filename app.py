@@ -72,9 +72,11 @@ def save_running_pids(pids: dict):
     with open(RUNNING_PIDS_FILE, "w") as f:
         json.dump(pids, f, indent=2)
 
-# Helper: Parse active listening ports from `ss -ltnp`
+# Helper: Parse active listening ports from both WSL (`ss -ltnp`) and Windows (`netstat.exe -ano`)
 def get_active_system_ports() -> List[dict]:
     ports_info = []
+    
+    # 1. Fetch WSL ports
     try:
         # Run ss -ltnp to get listening TCP ports with process details
         result = subprocess.run(
@@ -85,49 +87,121 @@ def get_active_system_ports() -> List[dict]:
             check=True
         )
         lines = result.stdout.strip().split("\n")
-        if len(lines) <= 1:
-            return []
-        
-        # Parse output
-        for line in lines[1:]:
-            parts = line.split()
-            if len(parts) < 4:
-                continue
-            
-            local_addr = parts[3]
-            # Extract port
-            port_match = re.search(r':(\d+)$', local_addr)
-            if not port_match:
-                continue
-            port = int(port_match.group(1))
-            
-            # Extract process details (PID & Name)
-            proc_name = "Unknown"
-            pid = None
-            if len(parts) >= 6:
-                proc_str = " ".join(parts[5:])
-                pid_match = re.search(r'pid=(\d+)', proc_str)
-                if pid_match:
-                    pid = int(pid_match.group(1))
-                name_match = re.search(r'users:\(\("([^"]+)"', proc_str)
-                if name_match:
-                    proc_name = name_match.group(1)
-                else:
-                    name_match2 = re.search(r'\(\("([^"]+)"', proc_str)
-                    if name_match2:
-                        proc_name = name_match2.group(1)
-            
-            # Check if this port is already added to avoid duplicates in list
-            if not any(p["port"] == port for p in ports_info):
-                ports_info.append({
-                    "address": local_addr,
-                    "port": port,
-                    "process": proc_name,
-                    "pid": pid,
-                    "status": "listening"
-                })
+        if len(lines) > 1:
+            # Parse output
+            for line in lines[1:]:
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                
+                local_addr = parts[3]
+                # Extract port
+                port_match = re.search(r':(\d+)$', local_addr)
+                if not port_match:
+                    continue
+                port = int(port_match.group(1))
+                
+                # Extract process details (PID & Name)
+                proc_name = "Unknown"
+                pid = None
+                if len(parts) >= 6:
+                    proc_str = " ".join(parts[5:])
+                    pid_match = re.search(r'pid=(\d+)', proc_str)
+                    if pid_match:
+                        pid = int(pid_match.group(1))
+                    name_match = re.search(r'users:\(\("([^"]+)"', proc_str)
+                    if name_match:
+                        proc_name = name_match.group(1)
+                    else:
+                        name_match2 = re.search(r'\(\("([^"]+)"', proc_str)
+                        if name_match2:
+                            proc_name = name_match2.group(1)
+                
+                # Check if this port is already added to avoid duplicates in list
+                if not any(p["port"] == port and p.get("platform") == "wsl" for p in ports_info):
+                    ports_info.append({
+                        "address": local_addr,
+                        "port": port,
+                        "process": proc_name,
+                        "pid": pid,
+                        "status": "listening",
+                        "platform": "wsl"
+                    })
     except Exception as e:
-        print(f"Error parsing ports: {e}")
+        print(f"Error parsing WSL ports: {e}")
+
+    # 2. Fetch Windows ports
+    try:
+        # Get process names mapping
+        pid_to_name = {}
+        res = subprocess.run(
+            ["/mnt/c/Windows/System32/tasklist.exe", "/FO", "CSV", "/NH"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=2.0
+        )
+        if res.returncode == 0:
+            import csv
+            import io
+            reader = csv.reader(io.StringIO(res.stdout))
+            for row in reader:
+                if len(row) >= 2:
+                    name = row[0]
+                    pid = row[1]
+                    try:
+                        pid_to_name[int(pid)] = name
+                    except ValueError:
+                        pass
+
+        # Get netstat
+        res = subprocess.run(
+            ["/mnt/c/Windows/System32/netstat.exe", "-ano"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=2.0
+        )
+        if res.returncode == 0:
+            lines = res.stdout.strip().split("\n")
+            for line in lines:
+                if "LISTENING" in line:
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        proto = parts[0]
+                        local_addr = parts[1]
+                        state = parts[3]
+                        pid_str = parts[4]
+                        
+                        port_match = re.search(r':(\d+)$', local_addr)
+                        if port_match:
+                            port = int(port_match.group(1))
+                            try:
+                                pid = int(pid_str)
+                            except ValueError:
+                                pid = None
+                            
+                            proc_name = pid_to_name.get(pid, "Unknown") if pid else "Unknown"
+                            
+                            # Avoid duplicates and clearly distinguish
+                            if not any(p["port"] == port and p.get("platform") == "windows" for p in ports_info):
+                                ports_info.append({
+                                    "address": f"[Win] {local_addr}",
+                                    "port": port,
+                                    "process": f"[Win] {proc_name}",
+                                    "pid": pid,
+                                    "status": "listening",
+                                    "platform": "windows"
+                                })
+    except Exception as e:
+        print(f"Error parsing Windows ports: {e}")
+
+    # Sort ports numerically
+    ports_info.sort(key=lambda x: x["port"])
     return ports_info
 
 # Helper: Check if process is running by PID
@@ -242,9 +316,24 @@ def get_system_ports():
     return get_active_system_ports()
 
 @app.post("/api/system/ports/kill/{pid}")
-def kill_system_process(pid: int):
+def kill_system_process(pid: int, platform: str = "wsl"):
     if pid <= 1:
         raise HTTPException(status_code=400, detail="Cannot kill system process 1")
+    
+    if platform == "windows":
+        try:
+            # Kill Windows process using taskkill.exe /F /PID
+            result = subprocess.run(
+                ["/mnt/c/Windows/System32/taskkill.exe", "/F", "/PID", str(pid)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True
+            )
+            return {"success": True, "message": f"Successfully killed Windows process PID {pid}!"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to kill Windows process {pid}: {str(e)}")
+
     try:
         # Try killing process group first
         pgid = os.getpgid(pid)

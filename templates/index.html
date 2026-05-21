@@ -202,22 +202,38 @@
       <!-- 导航和左侧托管服务 (8 col on XL) -->
       <section class="xl:col-span-8 flex flex-col h-full overflow-hidden">
         
-        <!-- 切换 Tab 按钮 -->
-        <div class="flex space-x-2 border-b border-hermes-cream/10 pb-3 mb-4">
-          <button 
-            @click="activeTab = 'managed'" 
-            :class="[activeTab === 'managed' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
-            class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
-          >
-            ┊ 托管项目 ({{ projects.length }})
-          </button>
-          <button 
-            @click="activeTab = 'system'" 
-            :class="[activeTab === 'system' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
-            class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
-          >
-            ┊ 全局端口 ({{ systemPorts.length }})
-          </button>
+        <!-- 切换 Tab 按钮 & 高危操作安全锁 -->
+        <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-hermes-cream/10 pb-3 mb-4 gap-3">
+          <div class="flex space-x-2">
+            <button 
+              @click="activeTab = 'managed'" 
+              :class="[activeTab === 'managed' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
+              class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
+            >
+              ┊ 托管项目 ({{ projects.length }})
+            </button>
+            <button 
+              @click="activeTab = 'system'" 
+              :class="[activeTab === 'system' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
+              class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
+            >
+              ┊ 全局端口 ({{ systemPorts.length }})
+            </button>
+          </div>
+
+          <!-- 高危操作安全防护锁 -->
+          <div class="flex items-center space-x-2 font-mono text-xs select-none">
+            <span class="text-hermes-dimmed">高危安全锁:</span>
+            <button 
+              @click="safetyLock = !safetyLock"
+              :class="[safetyLock ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-400' : 'bg-rose-950/50 border-rose-500 text-rose-400 shadow-[0_0_10px_rgba(239,68,68,0.2)]']"
+              class="border rounded px-3 py-1.5 flex items-center gap-1.5 transition-all cursor-pointer font-bold"
+            >
+              <svg v-if="safetyLock" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
+              <svg v-else class="w-3.5 h-3.5 animate-bounce" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"></path></svg>
+              {{ safetyLock ? '已锁定 (安全模式)' : '已解除 (高危允许)' }}
+            </button>
+          </div>
         </div>
 
         <!-- 托管服务面板 -->
@@ -360,15 +376,54 @@
         <!-- 全局端口面板 -->
         <div v-if="activeTab === 'system'" class="flex-1 flex flex-col overflow-hidden">
           
-          <div class="flex justify-between items-center mb-4 font-mono text-xs">
+          <div class="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-3 mb-4 font-mono text-xs">
             <span class="text-hermes-dimmed">实时扫描 WSL 实例内当前处于 LISTEN (监听) 状态的所有 TCP 端口进程</span>
-            <button 
-              @click="fetchSystemPorts()" 
-              class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 15H17.5"></path></svg>
-              刷新扫描
-            </button>
+            <div class="flex items-center space-x-3 shrink-0">
+              <!-- 过滤按键组 -->
+              <div class="flex bg-black/60 rounded border border-hermes-cream/15 p-0.5 select-none shrink-0">
+                <button 
+                  type="button"
+                  @click="safetyFilter = 'all'"
+                  :class="[safetyFilter === 'all' ? 'bg-hermes-cream text-hermes-teal font-semibold' : 'text-hermes-dimmed hover:text-hermes-cream']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  全部 ({{ systemPorts.length }})
+                </button>
+                <button 
+                  type="button"
+                  @click="safetyFilter = 'safe'"
+                  :class="[safetyFilter === 'safe' ? 'bg-emerald-500 text-black font-semibold' : 'text-emerald-500/60 hover:text-emerald-400']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  🟢 安全 ({{ systemPorts.filter(p => getPortSafetyInfo(p.port, p.process).level === 'safe').length }})
+                </button>
+                <button 
+                  type="button"
+                  @click="safetyFilter = 'warning'"
+                  :class="[safetyFilter === 'warning' ? 'bg-amber-500 text-black font-semibold' : 'text-amber-500/60 hover:text-amber-400']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  🟡 警告 ({{ systemPorts.filter(p => getPortSafetyInfo(p.port, p.process).level === 'warning').length }})
+                </button>
+                <button 
+                  type="button"
+                  @click="safetyFilter = 'danger'"
+                  :class="[safetyFilter === 'danger' ? 'bg-rose-500 text-black font-semibold' : 'text-rose-500/60 hover:text-rose-400']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  🔴 极危 ({{ systemPorts.filter(p => getPortSafetyInfo(p.port, p.process).level === 'danger').length }})
+                </button>
+              </div>
+
+              <!-- 刷新按键 -->
+              <button 
+                @click="fetchSystemPorts()" 
+                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer text-[10px]"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 15H17.5"></path></svg>
+                刷新
+              </button>
+            </div>
           </div>
 
           <!-- 系统端口列表表格 -->
@@ -380,15 +435,18 @@
                   <th class="p-3">绑定地址</th>
                   <th class="p-3">运行进程</th>
                   <th class="p-3">PID</th>
+                  <th class="p-3">安全评估与功能释义</th>
                   <th class="p-3 text-right">控制操作</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-hermes-cream/5">
-                <tr v-if="systemPorts.length === 0">
-                  <td colspan="5" class="p-8 text-center text-hermes-dimmed">未检测到任何正在监听的 TCP 端口服务</td>
+                <tr v-if="filteredSystemPorts.length === 0">
+                  <td colspan="6" class="p-8 text-center text-hermes-dimmed">
+                    {{ systemPorts.length === 0 ? '未检测到任何正在监听的 TCP 端口服务' : '未检测到符合当前安全过滤条件的 TCP 端口服务' }}
+                  </td>
                 </tr>
                 <tr 
-                  v-for="port in systemPorts" 
+                  v-for="port in filteredSystemPorts" 
                   :key="port.port" 
                   class="hover:bg-hermes-card/50 transition-all"
                   :class="[isPortManaged(port.port) ? 'bg-hermes-card/30 text-hermes-accent' : 'text-hermes-cream/90']"
@@ -416,11 +474,34 @@
                   </td>
                   <!-- PID -->
                   <td class="p-3">{{ port.pid || '--' }}</td>
+                  <!-- 安全评估与功能释义 -->
+                  <td class="p-3 max-w-[320px]">
+                    <div class="flex items-center space-x-2">
+                      <span 
+                        class="text-[10px] border px-1.5 py-0.2 rounded font-bold shrink-0"
+                        :class="[getPortSafetyInfo(port.port, port.process).colorClass]"
+                      >
+                        {{ getPortSafetyInfo(port.port, port.process).label }}
+                      </span>
+                      <span class="text-hermes-dimmed truncate block hover:text-hermes-cream text-[11px] cursor-help" :title="getPortSafetyInfo(port.port, port.process).desc">
+                        {{ getPortSafetyInfo(port.port, port.process).desc }}
+                      </span>
+                    </div>
+                  </td>
                   <!-- 操作 -->
                   <td class="p-3 text-right flex justify-end space-x-2">
+                    <!-- 系统核心保护显示 -->
+                    <span 
+                      v-if="getPortSafetyInfo(port.port, port.process).level === 'danger'" 
+                      class="text-rose-400/60 text-[10px] flex items-center gap-1 select-none font-mono"
+                    >
+                      <svg class="w-3 h-3 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                      🔒 系统强锁保护
+                    </span>
+
                     <!-- 导入托管按钮 -->
                     <button 
-                      v-if="!isPortManaged(port.port)"
+                      v-if="!isPortManaged(port.port) && getPortSafetyInfo(port.port, port.process).level !== 'danger'"
                       @click="quickImportPort(port)"
                       class="bg-hermes-card hover:bg-hermes-cream hover:text-hermes-teal text-hermes-cream border border-hermes-cream/20 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
                     >
@@ -429,8 +510,8 @@
                     </button>
                     <!-- 强杀进程按钮 -->
                     <button 
-                      v-if="port.pid"
-                      @click="killProcess(port.pid, port.port)"
+                      v-if="port.pid && getPortSafetyInfo(port.port, port.process).level !== 'danger'"
+                      @click="killProcess(port.pid, port.port, port.platform || 'wsl')"
                       class="bg-rose-950/30 border border-rose-900 hover:bg-rose-900 text-rose-200 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
                     >
                       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -645,7 +726,7 @@
 
   <!-- Vue Logic Script -->
   <script>
-    const { createApp, ref, reactive, onMounted, onBeforeUnmount, nextTick } = Vue;
+    const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } = Vue;
 
     createApp({
       setup() {
@@ -653,6 +734,8 @@
         const activeTab = ref('managed'); // 'managed' or 'system'
         const projects = ref([]);
         const systemPorts = ref([]);
+        const safetyFilter = ref('all'); // 'all', 'safe', 'warning', 'danger'
+        const safetyLock = ref(true); // true = locked, false = unlocked
         const stats = ref({});
         const loadingStates = reactive({}); // Map project_id -> boolean (loading)
         
@@ -677,6 +760,17 @@
         // Global intervals
         let statsIntervalId = null;
         let portsIntervalId = null;
+
+        // Computed property to filter system ports by safety rating
+        const filteredSystemPorts = computed(() => {
+          if (safetyFilter.value === 'all') {
+            return systemPorts.value;
+          }
+          return systemPorts.value.filter(port => {
+            const safety = getPortSafetyInfo(port.port, port.process);
+            return safety.level === safetyFilter.value;
+          });
+        });
 
         // Fetch System Stats (CPU, Mem, IP, Uptime)
         const fetchSystemStats = async () => {
@@ -728,12 +822,30 @@
         };
 
         // Quick kill process by PID
-        const killProcess = async (pid, port) => {
-          if (!confirm(`确认要强杀 PID ${pid} (运行于端口 ${port}) 进程及其子进程吗？`)) {
+        const killProcess = async (pid, port, platform = 'wsl') => {
+          const portObj = systemPorts.value.find(p => p.pid === pid && p.port === port && p.platform === platform);
+          const processName = portObj ? portObj.process : 'Unknown';
+          const safety = getPortSafetyInfo(port, processName);
+          
+          if (safety.level === 'danger') {
+            alert(`⚠️ 【严禁强杀】\n\n该服务进程 [${processName}] (端口 ${port}) 被系统评估为【${safety.label}】级别！\n\n原因说明：\n${safety.desc}\n\n为了保障您的操作系统稳定性，本控制中心已硬编码拦截并禁用该终止操作！`);
             return;
+          } else if (safety.level === 'warning') {
+            if (safetyLock.value) {
+              alert(`🔒 【强杀已被安全锁拦截】\n\n服务进程 [${processName}] (端口 ${port}) 被系统评估为【${safety.label}】高危等级。\n\n原因说明：${safety.desc}\n\n为了避免误点击导致您的开发数据库或网络组网代理突然掉线，当前强杀已被拦截！\n\n💡【如何解锁？】\n若您确认需要强杀此进程，请先在控制台左上角将【高危安全锁】点击解锁！`);
+              return;
+            }
+            if (!confirm(`⚠️ 【警告：高危操作】\n\n您正在尝试强杀被评为【${safety.label}】级别的服务进程 [${processName}] (端口 ${port})。\n\n功能释义：\n${safety.desc}\n\n终止该服务可能会导致宿主机或其他依赖该服务的应用崩溃，您确定仍要继续终止它吗？`)) {
+              return;
+            }
+          } else {
+            if (!confirm(`确认要终止 PID ${pid} (运行于端口 ${port}) [${processName}] 的服务进程及其子进程吗？`)) {
+              return;
+            }
           }
+          
           try {
-            const res = await fetch(`/api/system/ports/kill/${pid}`, { method: 'POST' });
+            const res = await fetch(`/api/system/ports/kill/${pid}?platform=${platform}`, { method: 'POST' });
             const data = await res.json();
             if (res.ok && data.success) {
               alert(data.message || '进程终止成功！');
@@ -749,12 +861,23 @@
 
         // Quick import port to managed list
         const quickImportPort = (portObj) => {
+          const safety = getPortSafetyInfo(portObj.port, portObj.process);
+          if (safety.level === 'warning' && safetyLock.value) {
+            alert(`🔒 【操作已被安全锁拦截】\n\n该服务 [${portObj.process}] (端口 ${portObj.port}) 被系统评估为【警告】等级！\n\n原因说明：${safety.desc}\n\n该服务通常是您宿主机的核心数据库或全局组网代理。直接在控制台对其进行生命周期重新托管，可能会因端口二次占用导致宿主机原有进程死锁、停止或崩溃。\n\n💡【如何解锁？】\n若您确认需要强行托管该端口，请先在控制台左上角将【高危安全锁】点击解锁！`);
+            return;
+          }
+          if (safety.level === 'warning') {
+            if (!confirm(`⚠️ 【警告：高危导入】\n\n该进程服务 [${portObj.process}] (端口 ${portObj.port}) 属于警告级别系统级公共服务，强行托管其生命周期有二次占用导致死锁的风险！\n\n您确定仍然要在控制台导入并托管它吗？`)) {
+              return;
+            }
+          }
+
           isEditing.value = false;
           form.id = `port-${portObj.port}-${Date.now().toString().slice(-4)}`;
-          form.name = `${portObj.process === 'Unknown' ? '本地网页服务' : portObj.process}-${portObj.port}`;
+          form.name = `${portObj.process === 'Unknown' ? '本地网页服务' : portObj.process.replace('[Win] ', '')}-${portObj.port}`;
           form.port = portObj.port;
           form.cwd = '/mnt/g/AITOOLS/mydashboard'; // Default fallback
-          form.command = portObj.process !== 'Unknown' ? `${portObj.process}` : 'node server.js';
+          form.command = portObj.process !== 'Unknown' ? `${portObj.process.replace('[Win] ', '')}` : 'node server.js';
           form.description = `自全局扫描中导入的端口 ${portObj.port} 进程服务`;
           showProjectModal.value = true;
         };
@@ -965,12 +1088,117 @@
           if (logIntervalId) clearInterval(logIntervalId);
         });
 
+        const getPortExplanation = (port, processName) => {
+          const p = parseInt(port);
+          const proc = (processName || '').toLowerCase();
+          
+          if (p === 135) return 'Windows RPC 端点映射器，属于核心基础网络，严禁终止！';
+          if (p === 445) return 'Windows SMB 文件与打印机共享协议端口，系统核心服务。';
+          if (p === 139) return 'Windows NetBIOS 会话服务，主要用于局域网文件共享。';
+          if (p === 53) return 'DNS 域名解析服务端口。终止可能导致网络解析失败、无法上网。';
+          if (p === 3306) return 'MySQL / MariaDB 关系型数据库服务默认监听端口。';
+          if (p === 6379) return 'Redis 内存高速缓存数据库监听端口。';
+          if (p === 5432) return 'PostgreSQL 关系型数据库默认监听端口。';
+          if (p === 27017) return 'MongoDB 文档型非关系数据库默认监听端口。';
+          if (p === 11434) return 'Ollama 本地 AI 大模型推理引擎服务监听端口。';
+          if (p === 902 || p === 912) return 'VMware 虚拟机监控与授权传输通信端口。';
+          if (p === 7680) return 'Windows 传递优化 (Delivery Optimization)，用于局域网内分发补丁。';
+          if (p === 5357) return 'Windows Web 服务发现协议 (WSDAPI)，网络邻居设备发现服务。';
+          if (p === 9229) return '当前端口控制中心 (Port Dashboard) 的后端监听服务端口。';
+          if (p === 3000) return '常见前端/后端开发调试端口 (如 React, NestJS, Vite 备用)。';
+          if (p === 5173) return 'Vite (React/Vue) 前端开发环境默认热更新服务端口。';
+          if (p === 8000) return '常见后端框架默认调试端口 (如 FastAPI, Django, Laravel)。';
+          if (p === 8080) return '常用 Java Spring Boot, Vue-CLI 或者是 Web 服务器端口。';
+          
+          if (proc.includes('tailscaled')) return 'Tailscale 虚拟局域网/异地组网后台服务。';
+          if (proc.includes('clash') || proc.includes('v2ray') || proc.includes('xray')) return '本地网络科学上网代理、网关流转中转服务。';
+          if (proc.includes('docker')) return 'Docker 容器管理守护进程，控制虚拟容器引擎。';
+          if (proc.includes('nginx')) return 'Nginx 高性能反向代理与静态 Web 服务进程。';
+          
+          return '';
+        };
+
+        const getPortSafetyInfo = (port, processName) => {
+          const proc = (processName || '').toLowerCase();
+          const p = parseInt(port);
+          
+          let level = 'safe';
+          let label = '安全';
+          let colorClass = 'text-emerald-400 bg-emerald-950/40 border-emerald-800/40';
+          let baseDesc = '普通用户进程或网页开发服务。可以安全强杀终止，不会影响操作系统运行。';
+          
+          const isSystemCritical = 
+            proc.includes('svchost') || 
+            proc.includes('system') || 
+            proc.includes('lsass') || 
+            proc.includes('spoolsv') || 
+            proc.includes('init') || 
+            proc.includes('systemd') || 
+            proc.includes('smss') || 
+            proc.includes('csrss') || 
+            proc.includes('wininit') || 
+            proc.includes('services') ||
+            p === 135 || 
+            p === 445 || 
+            p === 139;
+            
+          if (isSystemCritical) {
+            level = 'danger';
+            label = '极危';
+            colorClass = 'text-rose-400 bg-rose-950/40 border-rose-800/40';
+            baseDesc = '系统核心级网络组件。强杀会导致蓝屏死机、系统立即重启或网络功能瘫痪，严禁终止！';
+          } else if (
+            proc.includes('tailscale') || 
+            proc.includes('vmware') || 
+            proc.includes('docker') || 
+            proc.includes('postgres') || 
+            proc.includes('mysql') || 
+            proc.includes('redis') || 
+            proc.includes('mongo') || 
+            proc.includes('ollama') || 
+            proc.includes('clash') || 
+            proc.includes('v2ray') || 
+            proc.includes('nginx') || 
+            proc.includes('apache') || 
+            p === 53 || 
+            p === 3306 || 
+            p === 6379 || 
+            p === 5432 || 
+            p === 27017 || 
+            p === 11434 || 
+            p === 902 || 
+            p === 912
+          ) {
+            level = 'warning';
+            label = '警告';
+            colorClass = 'text-amber-400 bg-amber-950/40 border-amber-800/40';
+            baseDesc = '基础代理、虚拟化或数据库等系统公共服务。终止会导致相关软件无法使用，请确认是否继续。';
+          }
+          
+          if (p === 9229) {
+            level = 'warning';
+            label = '自卫';
+            colorClass = 'text-cyan-400 bg-cyan-950/40 border-cyan-800/40';
+            baseDesc = '当前端口控制面板本身！若将其强杀，网页会立即断开连接，需要重新登录 WSL 启动服务。';
+          }
+          
+          const specificDesc = getPortExplanation(p, proc);
+          const finalDesc = specificDesc ? `${specificDesc} (${baseDesc})` : baseDesc;
+          
+          return { level, label, colorClass, desc: finalDesc };
+        };
+
         return {
           activeTab,
           projects,
           systemPorts,
+          safetyFilter,
+          safetyLock,
+          filteredSystemPorts,
           stats,
           loadingStates,
+          getPortSafetyInfo,
+          getPortExplanation,
           
           // Logs
           activeLogProject,
