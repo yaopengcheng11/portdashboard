@@ -17,11 +17,14 @@
    - 点击卡片上的 **日志 (Logs)**，即可在右侧类似 CRT 终端的绿色荧光代码块中**实时、免刷新、自动向下翻滚**监听该网页的控制台报错和输出。
    - 支持一键清除日志文件、一键复制全部日志。
 
-3. **全局活动端口进程扫描与强杀**：
-   - 实时调用 Linux 内核 `ss -ltnp` 扫描当前 WSL 实例内**所有正在监听的 TCP 端口**。
-   - 展示每个监听端口所绑定的地址、对应的运行进程名称、以及操作系统 PID。
-   - **一键导入托管**：看到某个端口已经在外面开着了？点击 “导入托管” 按钮，一键把该端口信息导入，免去手动输入端口的繁琐。
-   - **一键强杀进程**：如果某个端口被死锁或有残留服务，点击 “强杀 (Kill)” 即可直接干掉它。
+3. **双端活动端口扫描与智能高危防护 (WSL + Windows Host)**：
+   - **双端网络融合扫描**：不仅抓取 WSL 内部端口，还能跨界调用 Windows 的 `netstat.exe` 与 `tasklist.exe` 实时、免刷新扫描 Windows 宿主机上所有处于监听状态的 TCP 端口和进程，并以 `[Win]` 前缀呈现，打破系统壁垒。
+   - **智能安全评级与功能字典**：自动识别端口功能，智能归类为 `🟢 安全`、`🟡 警告`、`🔴 极危` 三个安全评级，自带高频网络协议（如 SMB, RPC, DNS, MySQL, Redis, Ollama, Vite 等）详细语义说明，鼠标悬浮即可查看大字报浮窗释义。
+   - **安全等级分流滤网**：表格上方集成响应式按钮组，支持一键按等级快速过滤，按钮实时展示当前分类下的活动进程总数，告别信息洪流。
+   - **高危操作双保险安全锁**：页面正上方配有极客美学设计的 `高危安全锁` 控制闸。
+     - **锁定状态（默认，安全模式）**：彻底锁定警告级高危操作。点击强杀警告级进程（如数据库）或对其执行导入托管，操作将被强力拦截并弹窗引导。
+     - **解锁状态（高危允许）**：允许强杀与托管，但执行时依然会弹出醒目的二次风险告知对话框，杜绝手抖。
+     - **极危进程硬核强锁**：对于系统内核级服务进程（如 `svchost.exe`, `System`, `lsass.exe`, `init`），面板**不展示“强杀”与“导入托管”按钮**，并显示 `🔒 系统强锁保护` 闪烁徽章，从根本上保证操作系统 100% 稳定，永不蓝屏！
 
 4. **系统核心指标监控看板**：
    - 顶部提供极其炫酷的 WSL 主机 IP 地址、实时 CPU 负载条、RAM 内存负载条和系统启动运行时间（Uptime）。
@@ -60,32 +63,39 @@ pm2 start app.py --name "app-port-dashboard" --interpreter python3
 pm2 save
 ```
 
-#### 方法二：配置 Linux Systemd 系统服务
-在 WSL 的 Ubuntu 实例中（确保 `/etc/wsl.conf` 开启了 `systemd` 选项），您可以创建一个系统服务文件 `/etc/systemd/system/mydashboard.service`：
+#### 方法二：配置 Linux Systemd 用户级系统服务（最推荐，免 Sudo、防输入密码阻碍自启）
+在 WSL 的 Ubuntu 实例中，采用 **Systemd User Service (用户级系统服务)** 是最完美、最安全的开机自启方式。它完全以您当前的用户身份在后台运行，既不需要管理员权限，又不会在开机时因为需要输入 Sudo 密码而导致自启死锁。
+
+创建并编辑用户服务文件：`~/.config/systemd/user/mydashboard.service`：
 
 ```ini
 [Unit]
 Description=My App Port Control Console
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=yaopc
 WorkingDirectory=/mnt/g/AITOOLS/mydashboard
 ExecStart=/home/yaopc/.hermes/hermes-agent/venv/bin/python3 app.py
 Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
-配置完成后，执行以下命令使服务生效，即可完成开机自启：
+配置完成后，**完全无需 sudo**，在当前普通用户终端执行以下命令即可立刻生效并完成开机自启绑定：
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable mydashboard
-sudo systemctl start mydashboard
+# 重载用户 Systemd 配置
+systemctl --user daemon-reload
+
+# 启用并立即启动服务
+systemctl --user enable --now mydashboard
+
+# 查看运行状态
+systemctl --user status mydashboard
 ```
 
 ---
