@@ -480,6 +480,11 @@ def start_project(project_id: str):
         log_file.write(f"===========================================================\n\n")
         log_file.flush()
         
+        # Inject environment variables to force unbuffered output and ANSI colors
+        sub_env = os.environ.copy()
+        sub_env["PYTHONUNBUFFERED"] = "1"
+        sub_env["FORCE_COLOR"] = "1"
+        
         # Start background subprocess with os.setsid to create a process group
         proc = subprocess.Popen(
             project["command"],
@@ -488,7 +493,7 @@ def start_project(project_id: str):
             stdout=log_file,
             stderr=subprocess.STDOUT,
             preexec_fn=os.setsid,
-            env=os.environ.copy()
+            env=sub_env
         )
         
         # Store in registries
