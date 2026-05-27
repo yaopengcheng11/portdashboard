@@ -7,6 +7,12 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+MODE="stable"
+if [ "${1:-}" = "dev" ]; then
+    MODE="dev"
+    shift
+fi
+
 echo -e "${CYAN}======================================================${NC}"
 echo -e "${CYAN}             P O R T   D A S H B O A R D${NC}"
 echo -e "${CYAN}======================================================${NC}"
@@ -39,15 +45,26 @@ if [ -z "$IP_ADDR" ]; then
     IP_ADDR="127.0.0.1"
 fi
 
+if [ "$MODE" = "dev" ]; then
+    export PORT_DASHBOARD_RELOAD=1
+    MODE_LABEL="开发模式 (热重载开启)"
+else
+    export PORT_DASHBOARD_RELOAD=0
+    MODE_LABEL="稳定模式 (热重载关闭)"
+fi
+
 echo -e "${GREEN}✓ 环境检测成功！${NC}"
 echo -e "使用 Python 执行器: ${YELLOW}$PYTHON_EXE${NC}"
+echo -e "启动模式: ${YELLOW}$MODE_LABEL${NC}"
 echo -e "控制台访问地址 (Windows 浏览器直接输入打开):"
 echo -e "  - 本地回环: ${GREEN}http://localhost:9229/${NC}"
 echo -e "  - 局域网/WSL: ${GREEN}http://$IP_ADDR:9229/${NC}"
 echo -e "------------------------------------------------------"
+echo -e "稳定模式: ./start.sh"
+echo -e "开发模式: ./start.sh dev"
 echo -e "按下 ${YELLOW}Ctrl+C${NC} 可停止控制中心服务。"
 echo ""
 
 # 3. Start the server
 cd "$(dirname "$0")"
-$PYTHON_EXE app.py
+"$PYTHON_EXE" app.py

@@ -268,7 +268,13 @@
               <div 
                 v-for="proj in projects" 
                 :key="proj.id" 
-                :class="[proj.status === 'running' ? 'border-hermes-accent/40 bg-hermes-card/80 shadow-[0_0_15px_rgba(255,189,56,0.08)]' : 'border-hermes-cream/10 bg-hermes-card/30']"
+                :class="[
+                  proj.status === 'running'
+                    ? 'border-hermes-accent/40 bg-hermes-card/80 shadow-[0_0_15px_rgba(255,189,56,0.08)]'
+                    : proj.status === 'external'
+                      ? 'border-sky-400/35 bg-sky-950/10 shadow-[0_0_15px_rgba(56,189,248,0.08)]'
+                      : 'border-hermes-cream/10 bg-hermes-card/30'
+                ]"
                 class="retro-border p-4 rounded relative overflow-hidden flex flex-col justify-between"
               >
                 <!-- 卡片顶部：服务名与运行指示器 -->
@@ -278,16 +284,34 @@
                       <!-- 状态呼吸灯 LED -->
                       <span class="relative flex h-2.5 w-2.5">
                         <span 
-                          :class="[proj.status === 'running' ? 'bg-emerald-400 animate-ping' : 'bg-stone-500']"
+                          :class="[
+                            proj.status === 'running'
+                              ? 'bg-emerald-400 animate-ping'
+                              : proj.status === 'external'
+                                ? 'bg-sky-400 animate-ping'
+                                : 'bg-stone-500'
+                          ]"
                           class="absolute inline-flex h-full w-full rounded-full opacity-75"
                         ></span>
                         <span 
-                          :class="[proj.status === 'running' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-stone-600']"
+                          :class="[
+                            proj.status === 'running'
+                              ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
+                              : proj.status === 'external'
+                                ? 'bg-sky-500 shadow-[0_0_8px_#0ea5e9]'
+                                : 'bg-stone-600'
+                          ]"
                           class="relative inline-flex rounded-full h-2.5 w-2.5"
                         ></span>
                       </span>
                       <h4 class="font-mono font-bold text-hermes-cream text-base tracking-wide">{{ proj.name }}</h4>
                     </div>
+                    <span
+                      :class="projectStatusMeta(proj).class"
+                      class="font-mono text-[10px] px-2 py-0.5 border rounded uppercase tracking-wide"
+                    >
+                      {{ projectStatusMeta(proj).label }}
+                    </span>
                     <!-- 端口标签 -->
                     <span class="font-mono text-xs px-2 py-0.5 bg-hermes-teal border border-hermes-cream/20 text-hermes-cream rounded">
                       PORT: <strong class="text-hermes-accent font-bold">{{ proj.port }}</strong>
@@ -314,9 +338,18 @@
 
                 <!-- 卡片底部：操作控制区 -->
                 <div class="flex gap-2 text-xs pt-1 border-t border-hermes-cream/10">
+                  <button
+                    @click="openPortPage(proj.port)"
+                    :disabled="!proj.port_active"
+                    class="bg-hermes-accent/15 hover:bg-hermes-accent hover:text-hermes-teal border border-hermes-accent/40 text-hermes-accent font-mono px-3 py-1.5 rounded transition-all flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-hermes-accent/15 disabled:hover:text-hermes-accent"
+                    :title="proj.port_active ? `访问 ${buildPortUrl(proj.port)}` : '端口当前未监听，无法访问页面'"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
+                    访问页面
+                  </button>
                   <!-- 启闭控制 -->
                   <button 
-                    v-if="proj.status !== 'running'" 
+                    v-if="proj.status === 'stopped'" 
                     @click="startProject(proj.id)"
                     :disabled="loadingStates[proj.id]"
                     class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -328,7 +361,7 @@
                     </template>
                   </button>
                   <button 
-                    v-else 
+                    v-else-if="proj.status === 'running'"
                     @click="stopProject(proj.id)"
                     :disabled="loadingStates[proj.id]"
                     class="flex-1 bg-rose-700 hover:bg-rose-600 text-white font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(244,63,94,0.15)]"
@@ -338,6 +371,14 @@
                       <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                       关闭
                     </template>
+                  </button>
+                  <button
+                    v-else
+                    @click="showExternalStateHelp(proj)"
+                    class="flex-1 bg-sky-950/40 hover:bg-sky-900/50 text-sky-300 border border-sky-500/30 font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    外部运行中
                   </button>
 
                   <!-- 实时日志 -->
@@ -395,7 +436,7 @@
                   :class="[safetyFilter === 'safe' ? 'bg-emerald-500 text-black font-semibold' : 'text-emerald-500/60 hover:text-emerald-400']"
                   class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
                 >
-                  🟢 安全 ({{ systemPorts.filter(p => getPortSafetyInfo(p.port, p.process).level === 'safe').length }})
+                  🟢 安全 ({{ safetyCounts.safe }})
                 </button>
                 <button 
                   type="button"
@@ -403,7 +444,7 @@
                   :class="[safetyFilter === 'warning' ? 'bg-amber-500 text-black font-semibold' : 'text-amber-500/60 hover:text-amber-400']"
                   class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
                 >
-                  🟡 警告 ({{ systemPorts.filter(p => getPortSafetyInfo(p.port, p.process).level === 'warning').length }})
+                  🟡 警告 ({{ safetyCounts.warning }})
                 </button>
                 <button 
                   type="button"
@@ -411,7 +452,7 @@
                   :class="[safetyFilter === 'danger' ? 'bg-rose-500 text-black font-semibold' : 'text-rose-500/60 hover:text-rose-400']"
                   class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
                 >
-                  🔴 极危 ({{ systemPorts.filter(p => getPortSafetyInfo(p.port, p.process).level === 'danger').length }})
+                  🔴 极危 ({{ safetyCounts.danger }})
                 </button>
               </div>
 
@@ -479,12 +520,12 @@
                     <div class="flex items-center space-x-2">
                       <span 
                         class="text-[10px] border px-1.5 py-0.2 rounded font-bold shrink-0"
-                        :class="[getPortSafetyInfo(port.port, port.process).colorClass]"
+                        :class="[port.safety.colorClass]"
                       >
-                        {{ getPortSafetyInfo(port.port, port.process).label }}
+                        {{ port.safety.label }}
                       </span>
-                      <span class="text-hermes-dimmed truncate block hover:text-hermes-cream text-[11px] cursor-help" :title="getPortSafetyInfo(port.port, port.process).desc">
-                        {{ getPortSafetyInfo(port.port, port.process).desc }}
+                      <span class="text-hermes-dimmed truncate block hover:text-hermes-cream text-[11px] cursor-help" :title="port.safety.desc">
+                        {{ port.safety.desc }}
                       </span>
                     </div>
                   </td>
@@ -492,16 +533,24 @@
                   <td class="p-3 text-right flex justify-end space-x-2">
                     <!-- 系统核心保护显示 -->
                     <span 
-                      v-if="getPortSafetyInfo(port.port, port.process).level === 'danger'" 
+                      v-if="port.safety.level === 'danger'" 
                       class="text-rose-400/60 text-[10px] flex items-center gap-1 select-none font-mono"
                     >
                       <svg class="w-3 h-3 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                       🔒 系统强锁保护
                     </span>
 
+                    <button
+                      @click="openPortPage(port.port)"
+                      class="bg-hermes-accent/15 hover:bg-hermes-accent hover:text-hermes-teal text-hermes-accent border border-hermes-accent/40 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
+                      :title="`访问 ${buildPortUrl(port.port)}`"
+                    >
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
+                      打开
+                    </button>
                     <!-- 导入托管按钮 -->
                     <button 
-                      v-if="!isPortManaged(port.port) && getPortSafetyInfo(port.port, port.process).level !== 'danger'"
+                      v-if="!isPortManaged(port.port) && port.safety.level !== 'danger'"
                       @click="quickImportPort(port)"
                       class="bg-hermes-card hover:bg-hermes-cream hover:text-hermes-teal text-hermes-cream border border-hermes-cream/20 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
                     >
@@ -510,7 +559,7 @@
                     </button>
                     <!-- 强杀进程按钮 -->
                     <button 
-                      v-if="port.pid && getPortSafetyInfo(port.port, port.process).level !== 'danger'"
+                      v-if="port.pid && port.safety.level !== 'danger'"
                       @click="killProcess(port.pid, port.port, port.platform || 'wsl')"
                       class="bg-rose-950/30 border border-rose-900 hover:bg-rose-900 text-rose-200 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
                     >
@@ -644,9 +693,17 @@
                 v-model="form.name" 
                 type="text" 
                 required 
+                :disabled="form.sync_name"
                 placeholder="e.g. 个人主页前端"
-                class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
+                class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all disabled:opacity-50"
               >
+              <label class="mt-2 flex items-center gap-2 text-[10px] text-hermes-dimmed select-none">
+                <input v-model="form.sync_name" type="checkbox" class="accent-[#ffbd38]">
+                自动同步项目名称
+              </label>
+              <p class="text-[10px] text-hermes-dimmed/70 mt-1">
+                开启后会优先从项目目录读取真实名称：`package.json` 的 `productName/name`，或 `pyproject.toml` 的项目名；读不到时回退为目录名。
+              </p>
             </div>
             <!-- 运行端口 -->
             <div>
@@ -686,8 +743,12 @@
               type="text" 
               required 
               placeholder="e.g. python3 app.py 或 npm run dev"
-              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
+              :class="commandValidation.valid ? 'border-hermes-cream/20 focus:border-hermes-accent' : 'border-rose-500/70 focus:border-rose-400'"
+              class="w-full bg-black border rounded px-3 py-2 text-hermes-cream focus:outline-none transition-all"
             >
+            <p v-if="commandValidation.message" class="text-[10px] mt-1" :class="commandValidation.valid ? 'text-hermes-dimmed/70' : 'text-rose-300'">
+              {{ commandValidation.message }}
+            </p>
           </div>
 
           <!-- 项目说明 -->
@@ -712,7 +773,9 @@
             </button>
             <button 
               type="submit" 
-              class="bg-hermes-cream hover:bg-white text-hermes-teal font-bold px-5 py-2 transition-all cursor-pointer shadow-lg"
+              :disabled="!commandValidation.valid"
+              :class="commandValidation.valid ? 'bg-hermes-cream hover:bg-white text-hermes-teal' : 'bg-hermes-dimmed/30 text-hermes-dimmed cursor-not-allowed'"
+              class="font-bold px-5 py-2 transition-all shadow-lg"
             >
               保存配置
             </button>
@@ -730,22 +793,21 @@
 
     createApp({
       setup() {
-        // State variables
-        const activeTab = ref('managed'); // 'managed' or 'system'
+        const activeTab = ref('managed');
         const projects = ref([]);
         const systemPorts = ref([]);
-        const safetyFilter = ref('all'); // 'all', 'safe', 'warning', 'danger'
-        const safetyLock = ref(true); // true = locked, false = unlocked
+        const safetyFilter = ref('all');
+        const safetyLock = ref(true);
         const stats = ref({});
-        const loadingStates = reactive({}); // Map project_id -> boolean (loading)
-        
-        // Log Monitor state
+        const loadingStates = reactive({});
+        const snapshotLoading = ref(false);
+
         const activeLogProject = ref(null);
         const logContent = ref('');
         const terminalBox = ref(null);
+        const logOffset = ref(0);
         let logIntervalId = null;
 
-        // Add/Edit Project Form state
         const showProjectModal = ref(false);
         const isEditing = ref(false);
         const form = reactive({
@@ -754,79 +816,140 @@
           cwd: '',
           command: '',
           port: '',
-          description: ''
+          description: '',
+          sync_name: false
         });
 
-        // Global intervals
-        let statsIntervalId = null;
-        let portsIntervalId = null;
+        let snapshotIntervalId = null;
 
-        // Computed property to filter system ports by safety rating
         const filteredSystemPorts = computed(() => {
           if (safetyFilter.value === 'all') {
             return systemPorts.value;
           }
           return systemPorts.value.filter(port => {
-            const safety = getPortSafetyInfo(port.port, port.process);
-            return safety.level === safetyFilter.value;
+            return port.safety.level === safetyFilter.value;
           });
         });
 
-        // Fetch System Stats (CPU, Mem, IP, Uptime)
-        const fetchSystemStats = async () => {
-          try {
-            const res = await fetch('/api/system/stats');
-            if (res.ok) {
-              stats.value = await res.json();
+        const safetyCounts = computed(() => {
+          const counts = { safe: 0, warning: 0, danger: 0 };
+          for (const port of systemPorts.value) {
+            const level = port.safety?.level;
+            if (level && counts[level] !== undefined) {
+              counts[level] += 1;
             }
-          } catch (e) {
-            console.error("Error fetching stats:", e);
+          }
+          return counts;
+        });
+
+        const validateCommandInput = (command) => {
+          const raw = (command || '').trim();
+          if (!raw) {
+            return { valid: false, message: '启动命令不能为空。' };
+          }
+
+          const unsupportedTokens = ['|', '&&', '||', ';', '>', '<', '$(', '`'];
+          const hit = unsupportedTokens.find(token => raw.includes(token));
+          if (hit) {
+            return {
+              valid: false,
+              message: `当前版本不支持 shell 语法 ${hit}。请改成直接可执行命令，例如：PORT=8787 pnpm dev、python3 app.py、npx tsx server.ts。`
+            };
+          }
+
+          return {
+            valid: true,
+            message: '支持前置环境变量赋值，但不支持管道、重定向、命令串联和子 shell。'
+          };
+        };
+
+        const commandValidation = computed(() => validateCommandInput(form.command));
+
+        const applySnapshot = (data) => {
+          stats.value = data.stats || {};
+          systemPorts.value = (data.system_ports || []).map(port => ({
+            ...port,
+            safety: getPortSafetyInfo(port.port, port.process)
+          }));
+          projects.value = data.projects || [];
+
+          if (activeLogProject.value) {
+            const current = projects.value.find(p => p.id === activeLogProject.value.id);
+            if (current) {
+              activeLogProject.value = current;
+            }
           }
         };
 
-        // Fetch System active listen ports
+        const refreshDashboard = async (force = false) => {
+          if (snapshotLoading.value) return;
+          snapshotLoading.value = true;
+          try {
+            const res = await fetch(`/api/dashboard/snapshot${force ? '?force=true' : ''}`);
+            if (res.ok) {
+              applySnapshot(await res.json());
+            }
+          } catch (e) {
+            console.error('Error refreshing dashboard snapshot:', e);
+          } finally {
+            snapshotLoading.value = false;
+          }
+        };
+
         const fetchSystemPorts = async () => {
-          try {
-            const res = await fetch('/api/system/ports');
-            if (res.ok) {
-              systemPorts.value = await res.json();
-            }
-          } catch (e) {
-            console.error("Error scanning system ports:", e);
-          }
+          await refreshDashboard(true);
         };
 
-        // Fetch Projects list from backend
-        const fetchProjects = async () => {
-          try {
-            const res = await fetch('/api/projects');
-            if (res.ok) {
-              projects.value = await res.json();
-              
-              // If we are currently monitoring a project, keep its active info updated
-              if (activeLogProject.value) {
-                const current = projects.value.find(p => p.id === activeLogProject.value.id);
-                if (current) {
-                  activeLogProject.value = current;
-                }
-              }
-            }
-          } catch (e) {
-            console.error("Error fetching projects list:", e);
+        const projectStatusMeta = (proj) => {
+          if (proj.status === 'running') {
+            return {
+              label: '托管运行中',
+              class: 'text-emerald-300 border-emerald-500/40 bg-emerald-950/30'
+            };
           }
+          if (proj.status === 'external') {
+            return {
+              label: '外部运行中',
+              class: 'text-sky-300 border-sky-500/40 bg-sky-950/30'
+            };
+          }
+          return {
+            label: '已停止',
+            class: 'text-stone-300 border-stone-500/30 bg-stone-900/20'
+          };
         };
 
-        // Check if port is managed by existing projects list
+        const buildPortUrl = (port) => {
+          const hostname = window.location.hostname && window.location.hostname !== '0.0.0.0'
+            ? window.location.hostname
+            : 'localhost';
+          return `${window.location.protocol}//${hostname}:${port}/`;
+        };
+
+        const openPortPage = (port) => {
+          window.open(buildPortUrl(port), '_blank', 'noopener,noreferrer');
+        };
+
+        const showExternalStateHelp = (proj) => {
+          alert(
+            `项目“${proj.name}”当前处于【外部运行中】状态。\n\n` +
+            `端口 ${proj.port} 已被 ${proj.owner || '外部进程'} 占用，dashboard 可以识别它在运行，但不会把它当成“托管启动”的项目。\n\n` +
+            `如果你想让它显示成【托管运行中】：\n` +
+            `1. 先停止当前外部进程\n` +
+            `2. 再回到 dashboard 点击“启动”\n\n` +
+            `如果你只是想访问页面，现在直接点“访问页面”就可以。`
+          );
+        };
+
         const isPortManaged = (port) => {
           return projects.value.some(p => p.port === port);
         };
 
-        // Quick kill process by PID
         const killProcess = async (pid, port, platform = 'wsl') => {
           const portObj = systemPorts.value.find(p => p.pid === pid && p.port === port && p.platform === platform);
           const processName = portObj ? portObj.process : 'Unknown';
           const safety = getPortSafetyInfo(port, processName);
-          
+
           if (safety.level === 'danger') {
             alert(`⚠️ 【严禁强杀】\n\n该服务进程 [${processName}] (端口 ${port}) 被系统评估为【${safety.label}】级别！\n\n原因说明：\n${safety.desc}\n\n为了保障您的操作系统稳定性，本控制中心已硬编码拦截并禁用该终止操作！`);
             return;
@@ -843,23 +966,21 @@
               return;
             }
           }
-          
+
           try {
             const res = await fetch(`/api/system/ports/kill/${pid}?platform=${platform}`, { method: 'POST' });
             const data = await res.json();
             if (res.ok && data.success) {
               alert(data.message || '进程终止成功！');
-              fetchSystemPorts();
-              fetchProjects();
+              await refreshDashboard(true);
             } else {
-              alert(`强杀失败: ${data.detail || '未知错误'}`);
+              alert(`强杀失败: ${data.detail || data.message || '未知错误'}`);
             }
           } catch (e) {
             alert(`强杀失败: ${e.message}`);
           }
         };
 
-        // Quick import port to managed list
         const quickImportPort = (portObj) => {
           const safety = getPortSafetyInfo(portObj.port, portObj.process);
           if (safety.level === 'warning' && safetyLock.value) {
@@ -876,13 +997,13 @@
           form.id = `port-${portObj.port}-${Date.now().toString().slice(-4)}`;
           form.name = `${portObj.process === 'Unknown' ? '本地网页服务' : portObj.process.replace('[Win] ', '')}-${portObj.port}`;
           form.port = portObj.port;
-          form.cwd = '/mnt/g/AITOOLS/mydashboard'; // Default fallback
+          form.cwd = '/mnt/g/AITOOLS/mydashboard';
           form.command = portObj.process !== 'Unknown' ? `${portObj.process.replace('[Win] ', '')}` : 'node server.js';
           form.description = `自全局扫描中导入的端口 ${portObj.port} 进程服务`;
+          form.sync_name = false;
           showProjectModal.value = true;
         };
 
-        // Open Modal to Add Project
         const openAddProjectModal = () => {
           isEditing.value = false;
           form.id = `project-${Date.now().toString().slice(-4)}`;
@@ -891,10 +1012,10 @@
           form.command = '';
           form.port = '';
           form.description = '';
+          form.sync_name = false;
           showProjectModal.value = true;
         };
 
-        // Open Modal to Edit Project
         const openEditProjectModal = (proj) => {
           isEditing.value = true;
           form.id = proj.id;
@@ -903,29 +1024,33 @@
           form.command = proj.command;
           form.port = proj.port;
           form.description = proj.description;
+          form.sync_name = !!proj.sync_name;
           showProjectModal.value = true;
         };
 
-        // Save Project (Add or Edit)
         const saveProject = async () => {
-          if (!form.id || !form.name || !form.cwd || !form.command || !form.port) {
+          if (!form.id || (!form.sync_name && !form.name) || !form.cwd || !form.command || !form.port) {
             alert('请完整填写所有必填字段！');
             return;
           }
-          
+
+          if (!commandValidation.value.valid) {
+            alert(commandValidation.value.message);
+            return;
+          }
+
           try {
             const method = isEditing.value ? 'PUT' : 'POST';
             const url = isEditing.value ? `/api/projects/${form.id}` : '/api/projects';
-            
             const res = await fetch(url, {
-              method: method,
+              method,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ ...form })
             });
-            
+
             if (res.ok) {
               showProjectModal.value = false;
-              fetchProjects();
+              await refreshDashboard(true);
             } else {
               const err = await res.json();
               alert(`保存失败: ${err.detail || '未知错误'}`);
@@ -935,20 +1060,18 @@
           }
         };
 
-        // Delete Project from list
         const deleteProject = async (proj) => {
           if (!confirm(`确认要将项目 “${proj.name}” 自托管控制中心删除吗？（注意：如果服务正在运行，删除时也会强行关闭服务）`)) {
             return;
           }
-          
+
           try {
             const res = await fetch(`/api/projects/${proj.id}`, { method: 'DELETE' });
             if (res.ok) {
               if (activeLogProject.value && activeLogProject.value.id === proj.id) {
                 closeLogsPanel();
               }
-              fetchProjects();
-              fetchSystemPorts();
+              await refreshDashboard(true);
             } else {
               const err = await res.json();
               alert(`删除失败: ${err.detail || '未知错误'}`);
@@ -958,24 +1081,20 @@
           }
         };
 
-        // Start Project Process
         const startProject = async (projId) => {
           loadingStates[projId] = true;
           try {
             const res = await fetch(`/api/projects/${projId}/start`, { method: 'POST' });
             const data = await res.json();
-            
+
             if (res.ok) {
-              // Automatically open and monitor logs on start
+              await refreshDashboard(true);
               const proj = projects.value.find(p => p.id === projId);
               if (proj) {
                 openLogsPanel(proj);
               }
-              // Refresh state
-              fetchProjects();
-              fetchSystemPorts();
             } else {
-              alert(`启动失败: ${data.detail || '未知错误'}`);
+              alert(`启动失败: ${data.detail || data.message || '未知错误'}`);
             }
           } catch (e) {
             alert(`启动失败: ${e.message}`);
@@ -984,18 +1103,25 @@
           }
         };
 
-        // Stop Project Process
         const stopProject = async (projId) => {
           loadingStates[projId] = true;
           try {
             const res = await fetch(`/api/projects/${projId}/stop`, { method: 'POST' });
             const data = await res.json();
-            
-            if (res.ok) {
-              fetchProjects();
-              fetchSystemPorts();
+
+            if (res.ok && data.success) {
+              await refreshDashboard(true);
             } else {
-              alert(`停止失败: ${data.detail || '未知错误'}`);
+              if (data.external) {
+                const proj = projects.value.find(p => p.id === projId);
+                if (proj) {
+                  showExternalStateHelp(proj);
+                } else {
+                  alert(data.message || '当前项目处于外部运行状态，dashboard 不会自动停止外部进程。');
+                }
+              } else {
+                alert(`停止失败: ${data.detail || data.message || '未知错误'}`);
+              }
             }
           } catch (e) {
             alert(`停止失败: ${e.message}`);
@@ -1004,19 +1130,28 @@
           }
         };
 
-        // Monitor logs panel
+        const appendLogText = (text, reset = false) => {
+          if (reset) {
+            logContent.value = text;
+          } else {
+            logContent.value += text;
+          }
+          nextTick(() => {
+            if (terminalBox.value) {
+              terminalBox.value.scrollTop = terminalBox.value.scrollHeight;
+            }
+          });
+        };
+
         const openLogsPanel = (proj) => {
           if (logIntervalId) {
             clearInterval(logIntervalId);
           }
-          
+
           activeLogProject.value = proj;
+          logOffset.value = 0;
           logContent.value = '正在连接日志终端并拉取缓冲输出...\n';
-          
-          // Fetch logs immediately
-          fetchLogs();
-          
-          // Poll logs every 1.5s
+          fetchLogs(true);
           logIntervalId = setInterval(fetchLogs, 1500);
         };
 
@@ -1026,26 +1161,28 @@
             logIntervalId = null;
           }
           activeLogProject.value = null;
+          logOffset.value = 0;
           logContent.value = '';
         };
 
-        const fetchLogs = async () => {
+        const fetchLogs = async (reset = false) => {
           if (!activeLogProject.value) return;
           try {
-            const res = await fetch(`/api/projects/${activeLogProject.value.id}/logs`);
+            const query = reset ? '' : `?offset=${logOffset.value}`;
+            const res = await fetch(`/api/projects/${activeLogProject.value.id}/logs${query}`);
             if (res.ok) {
               const data = await res.json();
-              logContent.value = data.logs;
-              
-              // Auto scroll to bottom
-              nextTick(() => {
-                if (terminalBox.value) {
-                  terminalBox.value.scrollTop = terminalBox.value.scrollHeight;
-                }
-              });
+              if (reset || data.synthetic) {
+                appendLogText(data.logs || '', true);
+              } else if (data.truncated) {
+                appendLogText(`--- 已跳转到日志尾部，较早内容已省略 ---\n${data.logs || ''}`, true);
+              } else if (data.logs) {
+                appendLogText(data.logs, false);
+              }
+              logOffset.value = data.next_offset || 0;
             }
           } catch (e) {
-            console.error("Error polling logs:", e);
+            console.error('Error polling logs:', e);
           }
         };
 
@@ -1054,10 +1191,11 @@
           try {
             const res = await fetch(`/api/projects/${activeLogProject.value.id}/logs/clear`, { method: 'POST' });
             if (res.ok) {
-              fetchLogs();
+              logOffset.value = 0;
+              await fetchLogs(true);
             }
           } catch (e) {
-            console.error("Error clearing logs:", e);
+            console.error('Error clearing logs:', e);
           }
         };
 
@@ -1068,30 +1206,20 @@
             .catch(err => alert('复制失败: ' + err));
         };
 
-        // Mounted Hook
         onMounted(() => {
-          fetchSystemStats();
-          fetchSystemPorts();
-          fetchProjects();
-
-          // Poll System Stats every 3s
-          statsIntervalId = setInterval(fetchSystemStats, 3000);
-          
-          // Poll system active listen ports every 4s
-          portsIntervalId = setInterval(fetchSystemPorts, 4000);
+          refreshDashboard(true);
+          snapshotIntervalId = setInterval(refreshDashboard, 3000);
         });
 
-        // Cleanup intervals
         onBeforeUnmount(() => {
-          if (statsIntervalId) clearInterval(statsIntervalId);
-          if (portsIntervalId) clearInterval(portsIntervalId);
+          if (snapshotIntervalId) clearInterval(snapshotIntervalId);
           if (logIntervalId) clearInterval(logIntervalId);
         });
 
         const getPortExplanation = (port, processName) => {
           const p = parseInt(port);
           const proc = (processName || '').toLowerCase();
-          
+
           if (p === 135) return 'Windows RPC 端点映射器，属于核心基础网络，严禁终止！';
           if (p === 445) return 'Windows SMB 文件与打印机共享协议端口，系统核心服务。';
           if (p === 139) return 'Windows NetBIOS 会话服务，主要用于局域网文件共享。';
@@ -1109,64 +1237,64 @@
           if (p === 5173) return 'Vite (React/Vue) 前端开发环境默认热更新服务端口。';
           if (p === 8000) return '常见后端框架默认调试端口 (如 FastAPI, Django, Laravel)。';
           if (p === 8080) return '常用 Java Spring Boot, Vue-CLI 或者是 Web 服务器端口。';
-          
+
           if (proc.includes('tailscaled')) return 'Tailscale 虚拟局域网/异地组网后台服务。';
           if (proc.includes('clash') || proc.includes('v2ray') || proc.includes('xray')) return '本地网络科学上网代理、网关流转中转服务。';
           if (proc.includes('docker')) return 'Docker 容器管理守护进程，控制虚拟容器引擎。';
           if (proc.includes('nginx')) return 'Nginx 高性能反向代理与静态 Web 服务进程。';
-          
+
           return '';
         };
 
         const getPortSafetyInfo = (port, processName) => {
           const proc = (processName || '').toLowerCase();
           const p = parseInt(port);
-          
+
           let level = 'safe';
           let label = '安全';
           let colorClass = 'text-emerald-400 bg-emerald-950/40 border-emerald-800/40';
           let baseDesc = '普通用户进程或网页开发服务。可以安全强杀终止，不会影响操作系统运行。';
-          
-          const isSystemCritical = 
-            proc.includes('svchost') || 
-            proc.includes('system') || 
-            proc.includes('lsass') || 
-            proc.includes('spoolsv') || 
-            proc.includes('init') || 
-            proc.includes('systemd') || 
-            proc.includes('smss') || 
-            proc.includes('csrss') || 
-            proc.includes('wininit') || 
+
+          const isSystemCritical =
+            proc.includes('svchost') ||
+            proc.includes('system') ||
+            proc.includes('lsass') ||
+            proc.includes('spoolsv') ||
+            proc.includes('init') ||
+            proc.includes('systemd') ||
+            proc.includes('smss') ||
+            proc.includes('csrss') ||
+            proc.includes('wininit') ||
             proc.includes('services') ||
-            p === 135 || 
-            p === 445 || 
+            p === 135 ||
+            p === 445 ||
             p === 139;
-            
+
           if (isSystemCritical) {
             level = 'danger';
             label = '极危';
             colorClass = 'text-rose-400 bg-rose-950/40 border-rose-800/40';
             baseDesc = '系统核心级网络组件。强杀会导致蓝屏死机、系统立即重启或网络功能瘫痪，严禁终止！';
           } else if (
-            proc.includes('tailscale') || 
-            proc.includes('vmware') || 
-            proc.includes('docker') || 
-            proc.includes('postgres') || 
-            proc.includes('mysql') || 
-            proc.includes('redis') || 
-            proc.includes('mongo') || 
-            proc.includes('ollama') || 
-            proc.includes('clash') || 
-            proc.includes('v2ray') || 
-            proc.includes('nginx') || 
-            proc.includes('apache') || 
-            p === 53 || 
-            p === 3306 || 
-            p === 6379 || 
-            p === 5432 || 
-            p === 27017 || 
-            p === 11434 || 
-            p === 902 || 
+            proc.includes('tailscale') ||
+            proc.includes('vmware') ||
+            proc.includes('docker') ||
+            proc.includes('postgres') ||
+            proc.includes('mysql') ||
+            proc.includes('redis') ||
+            proc.includes('mongo') ||
+            proc.includes('ollama') ||
+            proc.includes('clash') ||
+            proc.includes('v2ray') ||
+            proc.includes('nginx') ||
+            proc.includes('apache') ||
+            p === 53 ||
+            p === 3306 ||
+            p === 6379 ||
+            p === 5432 ||
+            p === 27017 ||
+            p === 11434 ||
+            p === 902 ||
             p === 912
           ) {
             level = 'warning';
@@ -1174,17 +1302,17 @@
             colorClass = 'text-amber-400 bg-amber-950/40 border-amber-800/40';
             baseDesc = '基础代理、虚拟化或数据库等系统公共服务。终止会导致相关软件无法使用，请确认是否继续。';
           }
-          
+
           if (p === 9229) {
             level = 'warning';
             label = '自卫';
             colorClass = 'text-cyan-400 bg-cyan-950/40 border-cyan-800/40';
             baseDesc = '当前端口控制面板本身！若将其强杀，网页会立即断开连接，需要重新登录 WSL 启动服务。';
           }
-          
+
           const specificDesc = getPortExplanation(p, proc);
           const finalDesc = specificDesc ? `${specificDesc} (${baseDesc})` : baseDesc;
-          
+
           return { level, label, colorClass, desc: finalDesc };
         };
 
@@ -1195,12 +1323,13 @@
           safetyFilter,
           safetyLock,
           filteredSystemPorts,
+          safetyCounts,
           stats,
           loadingStates,
+          commandValidation,
           getPortSafetyInfo,
           getPortExplanation,
-          
-          // Logs
+
           activeLogProject,
           logContent,
           terminalBox,
@@ -1209,14 +1338,12 @@
           clearLogs,
           copyLogs,
 
-          // Actions
           killProcess,
           quickImportPort,
           startProject,
           stopProject,
           isPortManaged,
 
-          // Modals & Form
           showProjectModal,
           isEditing,
           form,
@@ -1224,7 +1351,11 @@
           openEditProjectModal,
           saveProject,
           deleteProject,
-          fetchSystemPorts
+          fetchSystemPorts,
+          projectStatusMeta,
+          buildPortUrl,
+          openPortPage,
+          showExternalStateHelp
         };
       }
     }).mount('#app');
