@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLI-Anything Port Dashboard - Help</title>
+<style>
+  :root {
+    --sidebar-w: 240px;
+    --bg: #0a0e14;
+    --surface: #111820;
+    --border: #1e2a3a;
+    --text: #c5d0db;
+    --text-dim: #6b7d8e;
+    --green: #3ddc84;
+    --cyan: #56d4dd;
+    --yellow: #e5c07b;
+    --red: #e06c75;
+    --orange: #d19a66;
+    --purple: #c678dd;
+    --blue: #61afef;
+    --code-bg: #0d1117;
+    --code-border: #1e2a3a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: "SF Mono","Cascadia Code","Fira Code","JetBrains Mono",Consolas,monospace;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  /* ── Sidebar ─────────────────────────────────── */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: var(--sidebar-w);
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    overflow-y: auto;
+  }
+  .sidebar-brand {
+    padding: 20px 18px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-brand h1 {
+    font-size: 14px;
+    color: var(--green);
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  .sidebar-brand .ver {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .sidebar nav { padding: 12px 0; flex: 1; }
+  .sidebar nav a {
+    display: block;
+    padding: 7px 18px;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 12px;
+    border-left: 2px solid transparent;
+    transition: all .15s;
+  }
+  .sidebar nav a:hover {
+    color: var(--text);
+    background: rgba(61,220,132,.04);
+  }
+  .sidebar nav a.active {
+    color: var(--green);
+    border-left-color: var(--green);
+    background: rgba(61,220,132,.06);
+  }
+  .sidebar nav a .num {
+    color: var(--text-dim);
+    margin-right: 6px;
+    font-size: 10px;
+    opacity: .5;
+  }
+
+  /* ── Mobile toggle ───────────────────────────── */
+  .menu-btn {
+    display: none;
+    position: fixed;
+    top: 12px; left: 12px;
+    z-index: 200;
+    width: 36px; height: 36px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--green);
+    font-size: 18px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── Main ─────────────────────────────────────── */
+  .main {
+    margin-left: var(--sidebar-w);
+    min-height: 100vh;
+  }
+  .topbar {
+    position: sticky;
+    top: 0;
+    background: rgba(10,14,20,.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 50;
+  }
+  .topbar .title { font-size: 13px; color: var(--text-dim); }
+  .topbar .title span { color: var(--cyan); }
+
+  .container {
+    max-width: 860px;
+    padding: 32px 32px 80px;
+  }
+
+  section { margin-bottom: 56px; scroll-margin-top: 60px; }
+
+  h2 {
+    font-size: 20px;
+    color: var(--cyan);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 .icon { font-size: 18px; color: var(--text-dim); }
+  h3 { font-size: 15px; color: var(--yellow); margin: 28px 0 12px; }
+  p { margin-bottom: 12px; }
+
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 13px;
+    color: var(--orange);
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 12px 0 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  pre code { background: none; border: none; padding: 0; color: var(--text); }
+  pre .comment { color: var(--text-dim); }
+  pre .flag    { color: var(--cyan); }
+  pre .string  { color: var(--orange); }
+  pre .keyword { color: var(--purple); }
+
+  .cmd-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 13px;
+  }
+  .cmd-table th {
+    text-align: left;
+    color: var(--cyan);
+    font-weight: 600;
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .cmd-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .cmd-table tr:hover { background: rgba(61,220,132,.03); }
+  .cmd-table td:first-child code { color: var(--green); white-space: nowrap; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .badge-required { background: rgba(224,108,117,.12); color: var(--red); }
+  .badge-optional { background: rgba(107,125,142,.12); color: var(--text-dim); }
+
+  .tip, .warning {
+    padding: 14px 18px;
+    border-radius: 0 6px 6px 0;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .tip {
+    background: rgba(86,212,221,.05);
+    border-left: 3px solid var(--cyan);
+  }
+  .tip::before {
+    color: var(--cyan);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 1px;
+    display: block;
+    margin-bottom: 4px;
+  }
+  body[data-lang="en"] .tip::before { content: "TIP"; }
+  body[data-lang="zh"] .tip::before { content: "\63D0\793A"; }
+  body[data-lang="compare"] .tip::before { content: "TIP / \63D0\793A"; }
+
+  .warning {
+    background: rgba(229,192,123,.05);
+    border-left: 3px solid var(--yellow);
+  }
+  .warning::before {
+    color: var(--yellow);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 1px;
+    display: block;
+    margin-bottom: 4px;
+  }
+  body[data-lang="en"] .warning::before { content: "WARNING"; }
+  body[data-lang="zh"] .warning::before { content: "\8B66\544A"; }
+  body[data-lang="compare"] .warning::before { content: "WARNING / \8B66\544A"; }
+
+  .output-block {
+    background: #060a0e;
+    border: 1px solid #1a2530;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 8px 0 16px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .output-block .green  { color: var(--green); }
+  .output-block .cyan   { color: var(--cyan); }
+  .output-block .yellow { color: var(--yellow); }
+  .output-block .red    { color: var(--red); }
+
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+    flex-wrap: wrap;
+  }
+  .flow-step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--green);
+  }
+  .flow-arrow { color: var(--text-dim); font-size: 14px; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 14px 0;
+  }
+  .two-col .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+  }
+  .two-col .card h4 { color: var(--green); font-size: 13px; margin-bottom: 6px; }
+
+  .footer {
+    text-align: center;
+    padding: 40px 0;
+    color: var(--text-dim);
+    font-size: 11px;
+    border-top: 1px solid var(--border);
+  }
+  .footer a { color: var(--cyan); text-decoration: none; }
+
+  /* ── Language toggle ──────────────────────────── */
+  .lang-toggle {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+    flex-shrink: 0;
+  }
+  .lang-toggle button {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all .15s;
+    letter-spacing: .3px;
+  }
+  .lang-toggle button:hover { color: var(--text); }
+  .lang-toggle button.active {
+    background: var(--green);
+    color: var(--bg);
+  }
+
+  /* ── Bilingual compare mode ───────────────────── */
+  .zh-only { display: none; }
+
+  body[data-lang="en"] .zh-only { display: none; }
+  body[data-lang="zh"] .en-only { display: none; }
+  body[data-lang="zh"] .zh-only { display: revert; }
+
+  body[data-lang="compare"] .zh-only {
+    display: block;
+    border-left: 2px solid var(--cyan);
+    padding-left: 12px;
+    margin-top: 6px;
+    opacity: .85;
+    color: var(--cyan);
+    font-style: italic;
+  }
+  body[data-lang="compare"] .zh-only.tip,
+  body[data-lang="compare"] .zh-only.warning {
+    display: block;
+    padding: 14px 18px;
+  }
+  body[data-lang="compare"] .zh-only li {
+    list-style: none;
+    margin-left: 0;
+    padding-left: 12px;
+    border-left: 2px solid var(--cyan);
+  }
+  body[data-lang="compare"] .zh-only.two-col {
+    display: grid;
+  }
+  body[data-lang="compare"] .zh-only.flow {
+    display: flex;
+  }
+  body[data-lang="compare"] .zh-only.cmd-table {
+    display: table;
+  }
+  body[data-lang="compare"] .zh-only.cmd-table tr {
+    display: table-row;
+  }
+  body[data-lang="compare"] .zh-only.cmd-table td,
+  body[data-lang="compare"] .zh-only.cmd-table th {
+    display: table-cell;
+  }
+
+  /* ── Responsive ──────────────────────────────── */
+  @media (max-width: 768px) {
+    .sidebar { transform: translateX(-100%); transition: transform .2s; }
+    .sidebar.open { transform: translateX(0); }
+    .menu-btn { display: flex; }
+    .main { margin-left: 0; }
+    .container { padding: 24px 16px 60px; }
+    .topbar { padding: 14px 16px 14px 56px; }
+    .two-col { grid-template-columns: 1fr; }
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 90;
+    }
+    .overlay.show { display: block; }
+  }
+</style>
+</head>
+<body data-lang="en">
+
+<button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+
+<!-- ── Sidebar ────────────────────────────────────────── -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <h1>CLI-Anything<br>Port Dashboard</h1>
+    <div class="ver">v1.0.0</div>
+  </div>
+  <nav id="sidebar-nav">
+    <a href="#overview"><span class="num">01</span> <span class="nav-label" data-en="Overview" data-zh="概览">Overview</span></a>
+    <a href="#prerequisites"><span class="num">02</span> <span class="nav-label" data-en="Prerequisites" data-zh="前置条件">Prerequisites</span></a>
+    <a href="#quickstart"><span class="num">03</span> <span class="nav-label" data-en="Quick Start" data-zh="快速开始">Quick Start</span></a>
+    <a href="#project"><span class="num">04</span> <span class="nav-label" data-en="project" data-zh="project 项目管理">project</span></a>
+    <a href="#port"><span class="num">05</span> <span class="nav-label" data-en="port" data-zh="port 端口扫描">port</span></a>
+    <a href="#system"><span class="num">06</span> <span class="nav-label" data-en="system" data-zh="system 系统监控">system</span></a>
+    <a href="#repl"><span class="num">07</span> <span class="nav-label" data-en="REPL Mode" data-zh="REPL 交互模式">REPL Mode</span></a>
+    <a href="#json"><span class="num">08</span> <span class="nav-label" data-en="JSON Output" data-zh="JSON 输出">JSON Output</span></a>
+    <a href="#workflows"><span class="num">09</span> <span class="nav-label" data-en="Workflows" data-zh="常用工作流">Workflows</span></a>
+    <a href="#config"><span class="num">10</span> <span class="nav-label" data-en="Configuration" data-zh="配置">Configuration</span></a>
+    <a href="#troubleshooting"><span class="num">11</span> <span class="nav-label" data-en="Troubleshooting" data-zh="故障排查">Troubleshooting</span></a>
+  </nav>
+</aside>
+
+<!-- ── Main ───────────────────────────────────────────── -->
+<div class="main">
+  <div class="topbar">
+    <div class="title"><span>cli-anything-portdashboard</span> &mdash; <span class="t" data-en="Help Documentation" data-zh="帮助文档">Help Documentation</span></div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="lang-toggle">
+        <button class="active" onclick="setLang('en', this)">EN</button>
+        <button onclick="setLang('zh', this)">中文</button>
+        <button onclick="setLang('compare', this)">对照</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- 1 -->
+    <section id="overview">
+      <h2><span class="icon">01</span> <span class="t" data-en="Overview" data-zh="概览">Overview</span></h2>
+      <p class="t" data-en='<code>cli-anything-portdashboard</code> is a command-line interface for the Port Dashboard web service. It lets you manage local projects, scan active ports, and monitor system resources from the terminal.' data-zh='<code>cli-anything-portdashboard</code> 是 Port Dashboard Web 服务的命令行界面。它让你可以从终端管理本地项目、扫描活动端口和监控系统资源。'><code>cli-anything-portdashboard</code> is a command-line interface for the Port Dashboard web service. It lets you manage local projects, scan active ports, and monitor system resources from the terminal.</p>
+      <p class="t" data-en='Designed for both human operators and AI agents. Use <code>--json</code> for machine-readable output, or run without arguments to enter the interactive REPL.' data-zh='专为人类操作员和 AI 智能体设计。使用 <code>--json</code> 获取机器可读输出，或无参数运行进入交互式 REPL。'>Designed for both human operators and AI agents. Use <code>--json</code> for machine-readable output, or run without arguments to enter the interactive REPL.</p>
+      <div class="two-col">
+        <div class="card">
+          <h4 class="t" data-en="For Humans" data-zh="面向人类">For Humans</h4>
+          <p style="font-size:13px" class="t" data-en="Colored tables, progress bars, status badges. Enter REPL mode for interactive management." data-zh="彩色表格、进度条、状态徽章。进入 REPL 模式进行交互式管理。">Colored tables, progress bars, status badges. Enter REPL mode for interactive management.</p>
+        </div>
+        <div class="card">
+          <h4 class="t" data-en="For AI Agents" data-zh="面向 AI 智能体">For AI Agents</h4>
+          <p style="font-size:13px" class="t" data-en='Every command supports <code>--json</code>. Structured output with consistent schemas.' data-zh='每个命令都支持 <code>--json</code>。结构化输出，模式一致。'>Every command supports <code>--json</code>. Structured output with consistent schemas.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2 -->
+    <section id="prerequisites">
+      <h2><span class="icon">02</span> <span class="t" data-en="Prerequisites &amp; Installation" data-zh="前置条件与安装">Prerequisites &amp; Installation</span></h2>
+      <h3 class="t" data-en="Requirements" data-zh="运行要求">Requirements</h3>
+      <ul style="margin-left:20px; margin-bottom:16px; font-size:13px">
+        <li class="t" data-en="Python 3.10+" data-zh="Python 3.10+">Python 3.10+</li>
+        <li class="t" data-en='Port Dashboard must be running (<code>http://localhost:9229</code>)' data-zh='Port Dashboard 必须已运行（<code>http://localhost:9229</code>）'>Port Dashboard must be running (<code>http://localhost:9229</code>)</li>
+        <li class="t" data-en='Packages: <code>click</code>, <code>requests</code>, <code>prompt_toolkit</code> (REPL)' data-zh='依赖包：<code>click</code>、<code>requests</code>、<code>prompt_toolkit</code>（REPL）'>Packages: <code>click</code>, <code>requests</code>, <code>prompt_toolkit</code> (REPL)</li>
+      </ul>
+      <h3 class="t" data-en="Install from source" data-zh="从源码安装">Install from source</h3>
+      <pre><code><span class="keyword">cd</span> G:\AITools\portdashboard\agent-harness
+pip install <span class="flag">-e</span> <span class="string">".[repl]"</span></code></pre>
+      <h3 class="t" data-en="Verify" data-zh="验证安装">Verify</h3>
+      <pre><code>cli-anything-portdashboard <span class="flag">--version</span></code></pre>
+      <div class="output-block">cli-anything-portdashboard, version 1.0.0</div>
+      <h3 class="t" data-en="Start the Dashboard (required)" data-zh="启动 Dashboard（必须）">Start the Dashboard (required)</h3>
+      <pre><code><span class="keyword">cd</span> G:\AITools\portdashboard
+.venv\Scripts\python.exe app.py</code></pre>
+      <div class="tip">
+        <span class="t" data-en='The CLI communicates with the Dashboard via HTTP. If the Dashboard is not running, all commands will fail with a connection error. Start <code>start.bat</code> first, or run <code>python app.py</code> in a separate terminal.' data-zh='CLI 通过 HTTP 与 Dashboard 通信。如果 Dashboard 未运行，所有命令都会因连接错误而失败。请先运行 <code>start.bat</code>，或在单独终端中运行 <code>python app.py</code>。'>The CLI communicates with the Dashboard via HTTP. If the Dashboard is not running, all commands will fail with a connection error. Start <code>start.bat</code> first, or run <code>python app.py</code> in a separate terminal.</span>
+      </div>
+    </section>
+
+    <!-- 3 -->
+    <section id="quickstart">
+      <h2><span class="icon">03</span> <span class="t" data-en="Quick Start" data-zh="快速开始">Quick Start</span></h2>
+      <pre><code><span class="comment"># Enter interactive REPL mode (default)</span>
+<span class="comment"># 进入交互式 REPL 模式（默认）</span>
+cli-anything-portdashboard
+
+<span class="comment"># List all managed projects</span>
+<span class="comment"># 列出所有已管理项目</span>
+cli-anything-portdashboard project list
+
+<span class="comment"># Scan active TCP ports</span>
+<span class="comment"># 扫描活动 TCP 端口</span>
+cli-anything-portdashboard port scan
+
+<span class="comment"># Show system stats</span>
+<span class="comment"># 显示系统状态</span>
+cli-anything-portdashboard system stats
+
+<span class="comment"># Full dashboard snapshot as JSON</span>
+<span class="comment"># 以 JSON 格式获取完整快照</span>
+cli-anything-portdashboard <span class="flag">--json</span> system snapshot</code></pre>
+    </section>
+
+    <!-- 4 -->
+    <section id="project">
+      <h2><span class="icon">04</span> project &mdash; <span class="t" data-en="Project Management" data-zh="项目管理">Project Management</span></h2>
+      <p class="t" data-en="Manage the full lifecycle of services tracked by the Dashboard." data-zh="管理 Dashboard 跟踪的服务的完整生命周期。">Manage the full lifecycle of services tracked by the Dashboard.</p>
+      <table class="cmd-table">
+        <thead><tr>
+          <th class="t" data-en="Command" data-zh="命令">Command</th>
+          <th class="t" data-en="Description" data-zh="说明">Description</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><code>project list</code></td>
+            <td><span class="t" data-en="List all projects with runtime status (running/stopped/external)" data-zh="列出所有项目及其运行状态（running/stopped/external）">List all projects with runtime status (running/stopped/external)</span></td></tr>
+          <tr><td><code>project add</code></td>
+            <td><span class="t" data-en="Register a new project with start command and port" data-zh="注册新项目，指定启动命令和端口">Register a new project with start command and port</span></td></tr>
+          <tr><td><code>project update &lt;id&gt;</code></td>
+            <td><span class="t" data-en="Update an existing project's configuration" data-zh="更新已有项目的配置">Update an existing project's configuration</span></td></tr>
+          <tr><td><code>project remove &lt;id&gt;</code></td>
+            <td><span class="t" data-en="Remove a project (stops it first if running)" data-zh="移除项目（如正在运行则先停止）">Remove a project (stops it first if running)</span></td></tr>
+          <tr><td><code>project start &lt;id&gt;</code></td>
+            <td><span class="t" data-en="Start a project's process" data-zh="启动项目进程">Start a project's process</span></td></tr>
+          <tr><td><code>project stop &lt;id&gt;</code></td>
+            <td><span class="t" data-en="Stop a running project (kills process tree)" data-zh="停止运行中的项目（终止进程树）">Stop a running project (kills process tree)</span></td></tr>
+          <tr><td><code>project status &lt;id&gt;</code></td>
+            <td><span class="t" data-en="Show detailed project info" data-zh="显示项目详细信息">Show detailed project info</span></td></tr>
+          <tr><td><code>project logs &lt;id&gt;</code></td>
+            <td><span class="t" data-en="View captured console output" data-zh="查看捕获的控制台输出">View captured console output</span></td></tr>
+          <tr><td><code>project logs-clear &lt;id&gt;</code></td>
+            <td><span class="t" data-en="Clear a project's log file" data-zh="清除项目日志文件">Clear a project's log file</span></td></tr>
+        </tbody>
+      </table>
+
+      <h3>project add &mdash; <span class="t" data-en="Register a new project" data-zh="注册新项目">Register a new project</span></h3>
+      <pre><code>cli-anything-portdashboard project add \
+    <span class="flag">--id</span> <span class="string">my-app</span> \
+    <span class="flag">--name</span> <span class="string">"My React App"</span> \
+    <span class="flag">--cwd</span> <span class="string">G:\projects\my-app</span> \
+    <span class="flag">--command</span> <span class="string">"npm run dev"</span> \
+    <span class="flag">--port</span> <span class="string">3000</span></code></pre>
+      <table class="cmd-table">
+        <thead><tr>
+          <th class="t" data-en="Flag" data-zh="参数">Flag</th>
+          <th class="t" data-en="Required" data-zh="必填">Required</th>
+          <th class="t" data-en="Description" data-zh="说明">Description</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><code>--id</code></td><td><span class="badge badge-required t" data-en="Required" data-zh="必填">Required</span></td><td class="t" data-en="Unique identifier for the project" data-zh="项目的唯一标识符">Unique identifier for the project</td></tr>
+          <tr><td><code>--name</code></td><td><span class="badge badge-required t" data-en="Required" data-zh="必填">Required</span></td><td class="t" data-en="Human-readable display name" data-zh="人类可读的显示名称">Human-readable display name</td></tr>
+          <tr><td><code>--cwd</code></td><td><span class="badge badge-required t" data-en="Required" data-zh="必填">Required</span></td><td class="t" data-en="Working directory (must exist)" data-zh="工作目录（必须存在）">Working directory (must exist)</td></tr>
+          <tr><td><code>--command</code></td><td><span class="badge badge-required t" data-en="Required" data-zh="必填">Required</span></td><td class="t" data-en='Start command (e.g. <code>npm run dev</code>)' data-zh='启动命令（如 <code>npm run dev</code>）'>Start command (e.g. <code>npm run dev</code>)</td></tr>
+          <tr><td><code>--port</code></td><td><span class="badge badge-required t" data-en="Required" data-zh="必填">Required</span></td><td class="t" data-en="TCP port the service listens on" data-zh="服务监听的 TCP 端口">TCP port the service listens on</td></tr>
+          <tr><td><code>--description</code></td><td><span class="badge badge-optional t" data-en="Optional" data-zh="可选">Optional</span></td><td class="t" data-en="Free-text description" data-zh="自由文本描述">Free-text description</td></tr>
+          <tr><td><code>--sync-name</code></td><td><span class="badge badge-optional t" data-en="Optional" data-zh="可选">Optional</span></td><td class="t" data-en='Auto-read name from <code>package.json</code> / <code>pyproject.toml</code>' data-zh='从 <code>package.json</code> / <code>pyproject.toml</code> 自动读取名称'>Auto-read name from <code>package.json</code> / <code>pyproject.toml</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>project start / stop</h3>
+      <pre><code><span class="comment"># Start a project / 启动项目</span>
+cli-anything-portdashboard project start my-app</code></pre>
+      <div class="output-block">  <span class="green">&#x2714;</span> Project 'My React App' started successfully
+    PID: 54321</div>
+      <pre><code><span class="comment"># Stop a project / 停止项目</span>
+cli-anything-portdashboard project stop my-app</code></pre>
+      <div class="output-block">  <span class="green">&#x2714;</span> Stopped managed project PID 54321</div>
+
+      <h3>project status &mdash; <span class="t" data-en="Detailed info" data-zh="详细信息">Detailed info</span></h3>
+      <pre><code>cli-anything-portdashboard project status hermes-dashboard</code></pre>
+      <div class="output-block">  <span class="cyan">Hermes Dashboard 官方终端</span>  [<span class="red">stopped</span>]
+  ID:            hermes-dashboard
+  Port:          19119
+  Command:       ...\hermes.cmd dashboard --no-open --port 19119
+  Directory:     C:\Users\admin\AppData\Local\hermes\hermes-agent
+  Description:   Hermes 官方自带的管理面板，负责配置、密钥、会话等监控
+  Managed:       No</div>
+
+      <h3>project logs</h3>
+      <pre><code>cli-anything-portdashboard project logs my-app
+
+<span class="comment"># With pagination / 分页查看</span>
+cli-anything-portdashboard project logs my-app <span class="flag">--offset</span> 0 <span class="flag">--limit</span> 4096</code></pre>
+    </section>
+
+    <!-- 5 -->
+    <section id="port">
+      <h2><span class="icon">05</span> port &mdash; <span class="t" data-en="Port Scanning" data-zh="端口扫描">Port Scanning</span></h2>
+      <p class="t" data-en="Discover active TCP listeners and manage processes." data-zh="发现活动的 TCP 监听器并管理进程。">Discover active TCP listeners and manage processes.</p>
+      <table class="cmd-table">
+        <thead><tr>
+          <th class="t" data-en="Command" data-zh="命令">Command</th>
+          <th class="t" data-en="Description" data-zh="说明">Description</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><code>port scan</code></td>
+            <td><span class="t" data-en="List all active TCP listening ports with process info" data-zh="列出所有活动 TCP 监听端口及进程信息">List all active TCP listening ports with process info</span></td></tr>
+          <tr><td><code>port kill &lt;pid&gt;</code></td>
+            <td><span class="t" data-en="Force-kill a process by PID (use with caution)" data-zh="通过 PID 强制终止进程（谨慎使用）">Force-kill a process by PID (use with caution)</span></td></tr>
+        </tbody>
+      </table>
+      <h3>port scan</h3>
+      <pre><code>cli-anything-portdashboard port scan</code></pre>
+      <div class="output-block">  PORT      ADDRESS                   PROCESS                 PID
+  --------------------------------------------------------------------
+  135       :::135                    svchost.exe             4612
+  3000      0.0.0.0:3000              node.exe                65256
+  8000      127.0.0.1:8000            python.exe              12345
+  9229      0.0.0.0:9229              python.exe              9999
+
+  <b>42</b> port(s) listening</div>
+
+      <h3>port kill</h3>
+      <pre><code>cli-anything-portdashboard port kill 65256</code></pre>
+      <div class="warning">
+        <span class="t" data-en='<code>port kill</code> uses <code>taskkill /F /T</code> on Windows, which terminates the entire process tree. Be careful with system PIDs. The Dashboard UI also has a safety lock to prevent killing critical system processes.' data-zh='<code>port kill</code> 在 Windows 上使用 <code>taskkill /F /T</code>，会终止整个进程树。对系统 PID 要小心。Dashboard UI 还有安全锁以防止终止关键系统进程。'><code>port kill</code> uses <code>taskkill /F /T</code> on Windows, which terminates the entire process tree. Be careful with system PIDs. The Dashboard UI also has a safety lock to prevent killing critical system processes.</span>
+      </div>
+    </section>
+
+    <!-- 6 -->
+    <section id="system">
+      <h2><span class="icon">06</span> system &mdash; <span class="t" data-en="System Monitoring" data-zh="系统监控">System Monitoring</span></h2>
+      <table class="cmd-table">
+        <thead><tr>
+          <th class="t" data-en="Command" data-zh="命令">Command</th>
+          <th class="t" data-en="Description" data-zh="说明">Description</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><code>system stats</code></td>
+            <td><span class="t" data-en="Show CPU usage, memory, IP, uptime" data-zh="显示 CPU 使用率、内存、IP、运行时间">Show CPU usage, memory, IP, uptime</span></td></tr>
+          <tr><td><code>system snapshot</code></td>
+            <td><span class="t" data-en="Full dashboard snapshot (stats + ports + projects)" data-zh="完整快照（状态 + 端口 + 项目）">Full dashboard snapshot (stats + ports + projects)</span></td></tr>
+        </tbody>
+      </table>
+      <h3>system stats</h3>
+      <pre><code>cli-anything-portdashboard system stats</code></pre>
+      <div class="output-block">  CPU     ..............................  <b>0.5%</b>
+  Memory  ##############................  <b>47.7%</b> (60.8/127.5 GB)
+
+  IP: 30.28.112.162    Uptime: 20m 44s    OS: Windows</div>
+      <p class="t" data-en="Progress bar color coding:" data-zh="进度条颜色编码：">Progress bar color coding:</p>
+      <ul style="margin-left:20px; font-size:13px; margin-bottom:16px">
+        <li><span style="color:var(--green)">Green / 绿色</span> &mdash; <span class="t" data-en="below 60%" data-zh="低于 60%">below 60%</span></li>
+        <li><span style="color:var(--yellow)">Yellow / 黄色</span> &mdash; <span class="t" data-en="60% to 85%" data-zh="60% 到 85%">60% to 85%</span></li>
+        <li><span style="color:var(--red)">Red / 红色</span> &mdash; <span class="t" data-en="above 85%" data-zh="高于 85%">above 85%</span></li>
+      </ul>
+      <h3>system snapshot</h3>
+      <pre><code>cli-anything-portdashboard system snapshot
+
+<span class="comment"># Force refresh (bypass cache) / 强制刷新（绕过缓存）</span>
+cli-anything-portdashboard system snapshot <span class="flag">--force</span></code></pre>
+      <p class="t" data-en="Returns a combined view: system stats, active ports, and project statuses in one output." data-zh="返回组合视图：系统状态、活动端口和项目状态合并在一个输出中。">Returns a combined view: system stats, active ports, and project statuses in one output.</p>
+    </section>
+
+    <!-- 7 -->
+    <section id="repl">
+      <h2><span class="icon">07</span> <span class="t" data-en="REPL Interactive Mode" data-zh="REPL 交互模式">REPL Interactive Mode</span></h2>
+      <p class="t" data-en='Running <code>cli-anything-portdashboard</code> without arguments enters the interactive REPL. Requires <code>prompt_toolkit</code> (installed via <code>pip install -e ".[repl]"</code>).' data-zh='无参数运行 <code>cli-anything-portdashboard</code> 将进入交互式 REPL。需要 <code>prompt_toolkit</code>（通过 <code>pip install -e ".[repl]"</code> 安装）。'>Running <code>cli-anything-portdashboard</code> without arguments enters the interactive REPL. Requires <code>prompt_toolkit</code> (installed via <code>pip install -e ".[repl]"</code>).</p>
+      <pre><code>cli-anything-portdashboard
+
+portdashboard&gt; <span class="keyword">help</span>
+  project list       <span class="comment">List all projects / 列出所有项目</span>
+  project start      <span class="comment">Start a project / 启动项目</span>
+  project stop       <span class="comment">Stop a project / 停止项目</span>
+  project status     <span class="comment">Show project status / 显示项目状态</span>
+  project logs       <span class="comment">View logs / 查看日志</span>
+  port scan          <span class="comment">Scan active listening ports / 扫描活动监听端口</span>
+  system stats       <span class="comment">Show CPU/memory stats / 显示 CPU/内存状态</span>
+  system snapshot    <span class="comment">Full dashboard snapshot / 完整快照</span>
+  open               <span class="comment">Open dashboard in browser / 在浏览器中打开</span>
+  help               <span class="comment">Show this help / 显示帮助</span>
+  exit               <span class="comment">Exit REPL / 退出 REPL</span>
+
+portdashboard&gt; <span class="keyword">project list</span>
+<span class="comment">  ... (formatted table output / 格式化表格输出) ...</span>
+
+portdashboard&gt; <span class="keyword">exit</span></code></pre>
+      <div class="tip">
+        <span class="t" data-en='REPL commands use the same syntax as CLI subcommands but without the <code>cli-anything-portdashboard</code> prefix. Type <code>exit</code>, <code>quit</code>, or press <code>Ctrl+C</code> to leave.' data-zh='REPL 命令与 CLI 子命令语法相同，但无需 <code>cli-anything-portdashboard</code> 前缀。输入 <code>exit</code>、<code>quit</code> 或按 <code>Ctrl+C</code> 退出。'>REPL commands use the same syntax as CLI subcommands but without the <code>cli-anything-portdashboard</code> prefix. Type <code>exit</code>, <code>quit</code>, or press <code>Ctrl+C</code> to leave.</span>
+      </div>
+    </section>
+
+    <!-- 8 -->
+    <section id="json">
+      <h2><span class="icon">08</span> <span class="t" data-en="JSON Output for Agents" data-zh="面向智能体的 JSON 输出">JSON Output for Agents</span></h2>
+      <p class="t" data-en='Add <code>--json</code> before the command to get structured JSON output. Every command supports this flag.' data-zh='在命令前添加 <code>--json</code> 获取结构化 JSON 输出。每个命令都支持此参数。'>Add <code>--json</code> before the command to get structured JSON output. Every command supports this flag.</p>
+      <pre><code>cli-anything-portdashboard <span class="flag">--json</span> project list</code></pre>
+      <div class="output-block">[
+  {
+    "id": "hermes-dashboard",
+    "name": "Hermes Dashboard 官方终端",
+    "cwd": "C:\\Users\\admin\\AppData\\Local\\hermes\\hermes-agent",
+    "command": "...\\hermes.cmd dashboard --no-open --port 19119",
+    "port": 19119,
+    "status": "<span class="red">stopped</span>",
+    "pid": null,
+    "owner": "Unknown",
+    "managed": false
+  }
+]</div>
+      <h3 class="t" data-en="Status values" data-zh="状态值">Status values</h3>
+      <table class="cmd-table">
+        <thead><tr>
+          <th class="t" data-en="Status" data-zh="状态">Status</th>
+          <th class="t" data-en="Meaning" data-zh="含义">Meaning</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><code>running</code></td>
+            <td><span class="t" data-en="Process is active and managed by the Dashboard" data-zh="进程活动且由 Dashboard 管理">Process is active and managed by the Dashboard</span></td></tr>
+          <tr><td><code>stopped</code></td>
+            <td><span class="t" data-en="No process running, port is free" data-zh="无进程运行，端口空闲">No process running, port is free</span></td></tr>
+          <tr><td><code>external</code></td>
+            <td><span class="t" data-en="Port is occupied by a process NOT started by the Dashboard" data-zh="端口被非 Dashboard 启动的进程占用">Port is occupied by a process NOT started by the Dashboard</span></td></tr>
+        </tbody>
+      </table>
+      <h3 class="t" data-en="JSON schemas" data-zh="JSON 模式">JSON schemas</h3>
+      <p><strong class="t" data-en="system stats:" data-zh="system stats：">system stats:</strong></p>
+      <div class="output-block">{
+  "cpu_percent": 0.5,
+  "memory": {
+    "percent": 47.7,
+    "total_gb": 127.5,
+    "used_gb": 60.8
+  },
+  "ip_address": "30.28.112.162",
+  "uptime": "20m 44s",
+  "os": "Windows"
+}</div>
+      <p><strong>port scan:</strong></p>
+      <div class="output-block">[
+  {
+    "address": "0.0.0.0:3000",
+    "port": 3000,
+    "process": "node.exe",
+    "pid": 65256,
+    "status": "listening",
+    "platform": "windows"
+  }
+]</div>
+    </section>
+
+    <!-- 9 -->
+    <section id="workflows">
+      <h2><span class="icon">09</span> <span class="t" data-en="Common Workflows" data-zh="常用工作流">Common Workflows</span></h2>
+
+      <h3 class="t" data-en="Add and start a new project" data-zh="添加并启动新项目">Add and start a new project</h3>
+      <div class="flow">
+        <span class="flow-step">project add</span>
+        <span class="flow-arrow">&rarr;</span>
+        <span class="flow-step">project start</span>
+        <span class="flow-arrow">&rarr;</span>
+        <span class="flow-step">project logs</span>
+      </div>
+      <pre><code>cli-anything-portdashboard project add \
+    <span class="flag">--id</span> <span class="string">api</span> \
+    <span class="flag">--name</span> <span class="string">"FastAPI Backend"</span> \
+    <span class="flag">--cwd</span> <span class="string">G:\projects\api</span> \
+    <span class="flag">--command</span> <span class="string">"python -m uvicorn main:app --port 8000"</span> \
+    <span class="flag">--port</span> <span class="string">8000</span>
+
+cli-anything-portdashboard project start api
+cli-anything-portdashboard project logs api</code></pre>
+
+      <h3 class="t" data-en="Check port availability before starting" data-zh="启动前检查端口可用性">Check port availability before starting</h3>
+      <pre><code><span class="comment"># Scan and check if port 3000 is free / 扫描并检查端口 3000 是否空闲</span>
+cli-anything-portdashboard <span class="flag">--json</span> port scan | python -c \
+    <span class="string">"import sys,json; ports=[p['port'] for p in json.load(sys.stdin)]; print('FREE' if 3000 not in ports else 'OCCUPIED')"</span></code></pre>
+
+      <h3 class="t" data-en="Full system health check" data-zh="完整系统健康检查">Full system health check</h3>
+      <div class="flow">
+        <span class="flow-step">system stats</span>
+        <span class="flow-arrow">&rarr;</span>
+        <span class="flow-step">port scan</span>
+        <span class="flow-arrow">&rarr;</span>
+        <span class="flow-step">project list</span>
+      </div>
+      <pre><code><span class="comment"># Or get everything in one call / 或一次获取所有信息</span>
+cli-anything-portdashboard <span class="flag">--json</span> system snapshot <span class="flag">--force</span></code></pre>
+
+      <h3 class="t" data-en="Project lifecycle: start, monitor, stop" data-zh="项目生命周期：启动、监控、停止">Project lifecycle: start, monitor, stop</h3>
+      <pre><code>cli-anything-portdashboard project start my-app
+cli-anything-portdashboard project status my-app
+cli-anything-portdashboard project logs my-app
+cli-anything-portdashboard project stop my-app</code></pre>
+
+      <h3 class="t" data-en="Kill a rogue process on a port" data-zh="终止端口上的异常进程">Kill a rogue process on a port</h3>
+      <pre><code><span class="comment"># Find the PID / 查找 PID</span>
+cli-anything-portdashboard <span class="flag">--json</span> port scan | python -c \
+    <span class="string">"import sys,json; [print(p['pid']) for p in json.load(sys.stdin) if p['port']==3000]"</span>
+
+<span class="comment"># Kill it / 终止它</span>
+cli-anything-portdashboard port kill &lt;PID&gt;</code></pre>
+    </section>
+
+    <!-- 10 -->
+    <section id="config">
+      <h2><span class="icon">10</span> <span class="t" data-en="Configuration" data-zh="配置">Configuration</span></h2>
+      <table class="cmd-table">
+        <thead><tr>
+          <th class="t" data-en="Environment Variable" data-zh="环境变量">Environment Variable</th>
+          <th class="t" data-en="Default" data-zh="默认值">Default</th>
+          <th class="t" data-en="Description" data-zh="说明">Description</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><code>PORT_DASHBOARD_URL</code></td>
+            <td><code>http://localhost:9229</code></td>
+            <td class="t" data-en="Base URL of the running Dashboard service" data-zh="运行中的 Dashboard 服务的基础 URL">Base URL of the running Dashboard service</td>
+          </tr>
+        </tbody>
+      </table>
+      <pre><code><span class="comment"># If Dashboard runs on a different port or host</span>
+<span class="comment"># 如果 Dashboard 运行在不同的端口或主机上</span>
+<span class="keyword">set</span> PORT_DASHBOARD_URL=http://192.168.1.100:8080
+cli-anything-portdashboard project list</code></pre>
+    </section>
+
+    <!-- 11 -->
+    <section id="troubleshooting">
+      <h2><span class="icon">11</span> <span class="t" data-en="Troubleshooting" data-zh="故障排查">Troubleshooting</span></h2>
+
+      <h3 class="t" data-en="Cannot connect to Port Dashboard" data-zh="无法连接到 Port Dashboard">Cannot connect to Port Dashboard</h3>
+      <pre><code><span class="red">Error: Cannot connect to Port Dashboard at http://localhost:9229</span>
+Make sure the dashboard is running: start.bat</code></pre>
+      <p><strong class="t" data-en="Solution:" data-zh="解决方法：">Solution:</strong> <span class="t" data-en="Start the Dashboard first:" data-zh="先启动 Dashboard：">Start the Dashboard first:</span></p>
+      <pre><code><span class="keyword">cd</span> G:\AITools\portdashboard
+start.bat
+<span class="comment"># or: .venv\Scripts\python.exe app.py</span></code></pre>
+
+      <h3 class="t" data-en="Chinese characters display garbled" data-zh="中文字符显示乱码">Chinese characters display garbled</h3>
+      <p class="t" data-en="The CLI automatically sets UTF-8 encoding on Windows. If you still see garbled text:" data-zh="CLI 在 Windows 上自动设置 UTF-8 编码。如果仍然看到乱码：">The CLI automatically sets UTF-8 encoding on Windows. If you still see garbled text:</p>
+      <pre><code><span class="keyword">chcp</span> 65001</code></pre>
+
+      <h3 class="t" data-en="Port already occupied by external process" data-zh="端口已被外部进程占用">Port already occupied by external process</h3>
+      <p class="t" data-en="When starting a project, if the target port is already in use by an unmanaged process:" data-zh="启动项目时，如果目标端口已被非管理进程占用：">When starting a project, if the target port is already in use by an unmanaged process:</p>
+      <ol style="margin-left:20px; font-size:13px">
+        <li class="t" data-en='Stop the external process: <code>cli-anything-portdashboard port kill &lt;PID&gt;</code>' data-zh='停止外部进程：<code>cli-anything-portdashboard port kill &lt;PID&gt;</code>'>Stop the external process: <code>cli-anything-portdashboard port kill &lt;PID&gt;</code></li>
+        <li class="t" data-en="Or change the project's port via <code>project update</code>" data-zh="或通过 <code>project update</code> 更改项目端口">Or change the project's port via <code>project update</code></li>
+      </ol>
+
+      <h3 class="t" data-en="REPL mode not working" data-zh="REPL 模式无法工作">REPL mode not working</h3>
+      <pre><code>pip install prompt_toolkit</code></pre>
+
+      <h3 class="t" data-en="Command not found after install" data-zh="安装后找不到命令">Command not found after install</h3>
+      <p class="t" data-en="Ensure the Python Scripts directory is in your PATH:" data-zh="确保 Python Scripts 目录在你的 PATH 中：">Ensure the Python Scripts directory is in your PATH:</p>
+      <pre><code>python -c <span class="string">"import sysconfig; print(sysconfig.get_path('scripts'))"</span></code></pre>
+      <p class="t" data-en="Add the output path to your system <code>PATH</code> variable." data-zh="将输出的路径添加到系统 <code>PATH</code> 变量中。">Add the output path to your system <code>PATH</code> variable.</p>
+    </section>
+
+    <div class="footer">
+      Generated by <a href="https://github.com/HKUDS/CLI-Anything">CLI-Anything</a> &middot; Port Dashboard v1.0.0
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Language switching ───────────────────────────────
+function setLang(lang, btn) {
+  document.body.setAttribute('data-lang', lang);
+  document.querySelectorAll('.lang-toggle button').forEach(b => {
+    b.classList.remove('active');
+  });
+  if (btn) btn.classList.add('active');
+
+  // Swap text for .t elements
+  document.querySelectorAll('.t').forEach(el => {
+    const en = el.getAttribute('data-en');
+    const zh = el.getAttribute('data-zh');
+    if (!en || !zh) return;
+
+    if (lang === 'en') {
+      el.innerHTML = en;
+    } else if (lang === 'zh') {
+      el.innerHTML = zh;
+    } else {
+      el.innerHTML = en + '<br><span style="color:var(--cyan);font-style:italic;font-size:.9em">' + zh + '</span>';
+    }
+  });
+
+  // Update nav labels
+  document.querySelectorAll('.nav-label').forEach(el => {
+    const en = el.getAttribute('data-en');
+    const zh = el.getAttribute('data-zh');
+    if (!en || !zh) return;
+    el.textContent = lang === 'zh' ? zh : en;
+  });
+}
+
+// ── Active section tracking ──────────────────────────
+const links = document.querySelectorAll('.sidebar nav a');
+const sections = [...links].map(a => document.querySelector(a.getAttribute('href')));
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      links.forEach(a => a.classList.remove('active'));
+      const active = document.querySelector(`.sidebar nav a[href="#${entry.target.id}"]`);
+      if (active) active.classList.add('active');
+    }
+  });
+}, { rootMargin: '-60px 0px -70% 0px', threshold: 0 });
+
+sections.forEach(s => { if (s) observer.observe(s); });
+
+// Close sidebar on nav click (mobile)
+links.forEach(a => a.addEventListener('click', () => {
+  if (window.innerWidth <= 768) toggleSidebar();
+}));
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+
+</body>
+</html>

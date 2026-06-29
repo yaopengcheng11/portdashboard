@@ -2,55 +2,110 @@ import csv
 import io
 import json
 import os
+import platform
 import re
 import shlex
 import signal
+import socket
 import subprocess
+import sys
 import threading
 import time
+import concurrent.futures
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import psutil
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-app = FastAPI(title="MyDashboard - Port Control Center")
+IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    readopt_processes()
+    ensure_background_refresh_thread()
+    invalidate_ports_cache()
+    yield
+
+app = FastAPI(title="MyDashboard - Port Control Center", lifespan=lifespan)
+
+
+class DynamicCORSMiddleware(BaseHTTPMiddleware):
+    """动态 CORS 中间件：自动检测系统活动端口并放行"""
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "")
+
+        # 基础白名单
+        allowed_origins = {
+            "http://localhost:9229",
+            "http://127.0.0.1:9229",
+        }
+
+        # 自动检测系统所有活动端口（使用缓存，3秒TTL）
+        try:
+            active_ports = get_active_system_ports()
+            for port_info in active_ports:
+                port = port_info.get("port")
+                if port:
+                    allowed_origins.add(f"http://localhost:{port}")
+                    allowed_origins.add(f"http://127.0.0.1:{port}")
+        except Exception:
+            pass
+
+        # 处理 preflight 请求
+        if request.method == "OPTIONS":
+            response = await call_next(request)
+            if origin in allowed_origins:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = "*"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
+
+        # 正常请求
+        response = await call_next(request)
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
+
+app.add_middleware(DynamicCORSMiddleware)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 PROJECTS_FILE = os.path.join(BASE_DIR, "projects.json")
 RUNNING_PIDS_FILE = os.path.join(BASE_DIR, "running_pids.json")
-WINDOWS_TASKLIST = "/mnt/c/Windows/System32/tasklist.exe"
-WINDOWS_NETSTAT = "/mnt/c/Windows/System32/netstat.exe"
-WINDOWS_TASKKILL = "/mnt/c/Windows/System32/taskkill.exe"
 PORTS_CACHE_TTL = 3.0
-WINDOWS_PORTS_CACHE_TTL = 15.0
 STATS_CACHE_TTL = 2.0
 LOG_READ_CHUNK_SIZE = 64 * 1024
-CPU_SAMPLE_INTERVAL = 0.5
 BACKGROUND_PORT_REFRESH_INTERVAL = 10.0
 
 os.makedirs(LOGS_DIR, exist_ok=True)
 
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 ACTIVE_PROCESSES: Dict[str, subprocess.Popen] = {}
+ACTIVE_LOG_FILES: Dict[str, io.IOBase] = {}
 START_TIME = time.time()
 PORTS_CACHE = {"timestamp": 0.0, "value": []}
-WINDOWS_PORTS_CACHE = {"timestamp": 0.0, "value": []}
 STATS_CACHE = {"timestamp": 0.0, "value": {}}
-CPU_SAMPLE = {"timestamp": 0.0, "idle": 0.0, "total": 0.0, "percent": 0.0}
 PROJECTS_LOCK = threading.Lock()
 PIDS_LOCK = threading.Lock()
 PORTS_CACHE_LOCK = threading.Lock()
+STATS_CACHE_LOCK = threading.Lock()
 PORTS_REFRESH_THREAD_STARTED = False
 
 
@@ -62,6 +117,12 @@ class Project(BaseModel):
     port: int
     description: Optional[str] = ""
     sync_name: bool = False
+
+
+def validate_project_id(project_id: str) -> str:
+    if "/" in project_id or "\\" in project_id or ".." in project_id or not project_id.strip():
+        raise HTTPException(status_code=400, detail="Invalid project ID: contains path traversal characters")
+    return project_id
 
 
 def atomic_write_json(path: str, data):
@@ -165,128 +226,159 @@ def save_running_pids(pids: dict):
         atomic_write_json(RUNNING_PIDS_FILE, pids)
 
 
-def run_command(command: List[str], timeout: Optional[float] = None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="ignore",
-        timeout=timeout,
-        check=False,
-    )
+def is_pid_running(pid: int) -> bool:
+    return psutil.pid_exists(pid)
 
 
-def parse_wsl_ports() -> List[dict]:
+def parse_listening_ports() -> List[dict]:
     ports_info = []
     seen_ports = set()
     try:
-        result = run_command(["ss", "-ltnp"], timeout=2.0)
-        if result.returncode != 0:
-            return ports_info
-        lines = result.stdout.strip().splitlines()
-        for line in lines[1:]:
-            parts = line.split()
-            if len(parts) < 4:
+        for conn in psutil.net_connections(kind="tcp"):
+            if conn.status != "LISTEN":
                 continue
-            local_addr = parts[3]
-            port_match = re.search(r':(\d+)$', local_addr)
-            if not port_match:
-                continue
-            port = int(port_match.group(1))
+            port = conn.laddr.port
             if port in seen_ports:
                 continue
+            pid = conn.pid
             proc_name = "Unknown"
-            pid = None
-            if len(parts) >= 6:
-                proc_str = " ".join(parts[5:])
-                pid_match = re.search(r'pid=(\d+)', proc_str)
-                if pid_match:
-                    pid = int(pid_match.group(1))
-                name_match = re.search(r'users:\(\("([^"]+)"', proc_str) or re.search(r'\(\("([^"]+)"', proc_str)
-                if name_match:
-                    proc_name = name_match.group(1)
-            ports_info.append(
-                {
+            project_name = ""
+            if pid:
+                try:
+                    proc = psutil.Process(pid)
+                    proc_name = proc.name()
+                    # Try to infer project name from working directory
+                    try:
+                        cwd = proc.cwd()
+                        inferred = infer_project_display_name(cwd)
+                        if inferred:
+                            project_name = inferred
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            ports_info.append({
+                "address": f"{conn.laddr.ip}:{port}",
+                "port": port,
+                "process": proc_name,
+                "pid": pid,
+                "status": "listening",
+                "platform": sys.platform,
+                "project_name": project_name,
+            })
+            seen_ports.add(port)
+    except (psutil.AccessDenied, OSError) as e:
+        print(f"Error parsing ports (psutil): {e}, falling back to netstat")
+        ports_info = _parse_ports_netstat()
+    return ports_info
+
+
+def _parse_ports_netstat() -> List[dict]:
+    """Fallback port scanner using netstat when psutil lacks permissions."""
+    ports_info = []
+    seen_ports = set()
+    try:
+        pid_to_name = {}
+
+        # Build PID-to-name mapping (platform-specific)
+        if IS_WINDOWS:
+            tasklist_result = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=3.0
+            )
+            if tasklist_result.returncode == 0:
+                reader = csv.reader(io.StringIO(tasklist_result.stdout))
+                for row in reader:
+                    if len(row) >= 2:
+                        try:
+                            pid_to_name[int(row[1])] = row[0]
+                        except ValueError:
+                            pass
+        else:
+            # Linux/macOS: read from psutil
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    pid_to_name[proc.info['pid']] = proc.info['name']
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+        # Run netstat (platform-specific flags)
+        if IS_WINDOWS:
+            netstat_result = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=3.0
+            )
+            if netstat_result.returncode != 0:
+                return ports_info
+            for line in netstat_result.stdout.strip().splitlines():
+                if "LISTENING" not in line:
+                    continue
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                local_addr = parts[1]
+                pid_str = parts[4]
+                port_match = re.search(r':(\d+)$', local_addr)
+                if not port_match:
+                    continue
+                port = int(port_match.group(1))
+                if port in seen_ports:
+                    continue
+                try:
+                    pid = int(pid_str)
+                except ValueError:
+                    pid = None
+                proc_name = pid_to_name.get(pid, "Unknown") if pid else "Unknown"
+                ports_info.append({
                     "address": local_addr,
                     "port": port,
                     "process": proc_name,
                     "pid": pid,
                     "status": "listening",
-                    "platform": "wsl",
-                }
+                    "platform": sys.platform,
+                })
+                seen_ports.add(port)
+        else:
+            # Linux/macOS: use -tlnp (Linux) or -lnp (macOS)
+            netstat_args = ["netstat", "-tlnp"] if IS_LINUX else ["netstat", "-lnp"]
+            netstat_result = subprocess.run(
+                netstat_args,
+                capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=3.0
             )
-            seen_ports.add(port)
-    except Exception as e:
-        print(f"Error parsing WSL ports: {e}")
-    return ports_info
-
-
-def parse_windows_ports() -> List[dict]:
-    ports_info = []
-    seen_ports = set()
-    try:
-        pid_to_name = {}
-        tasklist_result = run_command([WINDOWS_TASKLIST, "/FO", "CSV", "/NH"], timeout=2.0)
-        if tasklist_result.returncode == 0:
-            reader = csv.reader(io.StringIO(tasklist_result.stdout))
-            for row in reader:
-                if len(row) >= 2:
-                    try:
-                        pid_to_name[int(row[1])] = row[0]
-                    except ValueError:
-                        pass
-
-        netstat_result = run_command([WINDOWS_NETSTAT, "-ano"], timeout=2.0)
-        if netstat_result.returncode != 0:
-            return ports_info
-        for line in netstat_result.stdout.strip().splitlines():
-            if "LISTENING" not in line:
-                continue
-            parts = line.split()
-            if len(parts) < 5:
-                continue
-            local_addr = parts[1]
-            pid_str = parts[4]
-            port_match = re.search(r':(\d+)$', local_addr)
-            if not port_match:
-                continue
-            port = int(port_match.group(1))
-            if port in seen_ports:
-                continue
-            try:
-                pid = int(pid_str)
-            except ValueError:
+            if netstat_result.returncode != 0:
+                return ports_info
+            for line in netstat_result.stdout.strip().splitlines():
+                # Parse lines like: tcp  0  0  0.0.0.0:3000  0.0.0.0:*  LISTEN  12345/node
+                parts = line.split()
+                if len(parts) < 6:
+                    continue
+                local_addr = parts[3]
+                pid_prog = parts[-1] if IS_LINUX else parts[-1]
+                port_match = re.search(r':(\d+)$', local_addr)
+                if not port_match:
+                    continue
+                port = int(port_match.group(1))
+                if port in seen_ports:
+                    continue
+                # Extract PID from "pid/program" format
                 pid = None
-            proc_name = pid_to_name.get(pid, "Unknown") if pid else "Unknown"
-            ports_info.append(
-                {
-                    "address": f"[Win] {local_addr}",
+                proc_name = "Unknown"
+                pid_match = re.match(r'(\d+)/', pid_prog)
+                if pid_match:
+                    pid = int(pid_match.group(1))
+                    proc_name = pid_to_name.get(pid, "Unknown")
+                ports_info.append({
+                    "address": local_addr,
                     "port": port,
-                    "process": f"[Win] {proc_name}",
+                    "process": proc_name,
                     "pid": pid,
                     "status": "listening",
-                    "platform": "windows",
-                }
-            )
-            seen_ports.add(port)
+                    "platform": sys.platform,
+                })
+                seen_ports.add(port)
     except Exception as e:
-        print(f"Error parsing Windows ports: {e}")
+        print(f"Error parsing ports (netstat fallback): {e}")
     return ports_info
-
-
-def get_windows_ports(force_refresh: bool = False) -> List[dict]:
-    now = time.time()
-    with PORTS_CACHE_LOCK:
-        if not force_refresh and now - WINDOWS_PORTS_CACHE["timestamp"] < WINDOWS_PORTS_CACHE_TTL:
-            return list(WINDOWS_PORTS_CACHE["value"])
-
-    windows_ports = parse_windows_ports()
-    with PORTS_CACHE_LOCK:
-        WINDOWS_PORTS_CACHE["timestamp"] = now
-        WINDOWS_PORTS_CACHE["value"] = windows_ports
-        return list(WINDOWS_PORTS_CACHE["value"])
 
 
 def get_active_system_ports(force_refresh: bool = False) -> List[dict]:
@@ -295,10 +387,10 @@ def get_active_system_ports(force_refresh: bool = False) -> List[dict]:
         if not force_refresh and now - PORTS_CACHE["timestamp"] < PORTS_CACHE_TTL:
             return list(PORTS_CACHE["value"])
 
-    ports_info = parse_wsl_ports() + get_windows_ports(force_refresh=force_refresh)
-    ports_info.sort(key=lambda x: (x["port"], x["platform"]))
+    ports_info = parse_listening_ports()
+    ports_info.sort(key=lambda x: x["port"])
     with PORTS_CACHE_LOCK:
-        PORTS_CACHE["timestamp"] = now
+        PORTS_CACHE["timestamp"] = time.time()
         PORTS_CACHE["value"] = ports_info
         return list(PORTS_CACHE["value"])
 
@@ -306,7 +398,6 @@ def get_active_system_ports(force_refresh: bool = False) -> List[dict]:
 def invalidate_ports_cache():
     with PORTS_CACHE_LOCK:
         PORTS_CACHE["timestamp"] = 0.0
-        WINDOWS_PORTS_CACHE["timestamp"] = 0.0
 
 
 def background_refresh_ports_cache():
@@ -325,14 +416,6 @@ def ensure_background_refresh_thread():
     thread = threading.Thread(target=background_refresh_ports_cache, daemon=True, name="ports-cache-refresh")
     thread.start()
     PORTS_REFRESH_THREAD_STARTED = True
-
-
-def is_pid_running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
 
 
 def cleanup_stale_process_tracking(project_id: str, pids_map: Optional[dict] = None):
@@ -359,79 +442,23 @@ def readopt_processes():
     save_running_pids(updated_pids_map)
 
 
-@app.on_event("startup")
-def startup_event():
-    readopt_processes()
-    ensure_background_refresh_thread()
-    invalidate_ports_cache()
-
-
-def sample_cpu_percent() -> float:
-    try:
-        with open("/proc/stat", "r", encoding="utf-8") as f:
-            line = f.readline()
-        parts = line.split()
-        if not parts or parts[0] != "cpu":
-            return CPU_SAMPLE["percent"]
-        vals = [float(x) for x in parts[1:8]]
-        idle = vals[3] + vals[4]
-        total = sum(vals)
-        now = time.time()
-        prev_total = CPU_SAMPLE["total"]
-        prev_idle = CPU_SAMPLE["idle"]
-        prev_timestamp = CPU_SAMPLE["timestamp"]
-        if prev_total and now - prev_timestamp >= CPU_SAMPLE_INTERVAL:
-            diff_idle = idle - prev_idle
-            diff_total = total - prev_total
-            if diff_total > 0:
-                CPU_SAMPLE["percent"] = round((1.0 - diff_idle / diff_total) * 100, 1)
-        CPU_SAMPLE["idle"] = idle
-        CPU_SAMPLE["total"] = total
-        CPU_SAMPLE["timestamp"] = now
-    except Exception:
-        pass
-    return CPU_SAMPLE["percent"]
-
-
 def get_system_stats_snapshot(force_refresh: bool = False) -> dict:
     now = time.time()
-    if not force_refresh and now - STATS_CACHE["timestamp"] < STATS_CACHE_TTL and STATS_CACHE["value"]:
-        return STATS_CACHE["value"]
+    with STATS_CACHE_LOCK:
+        if not force_refresh and now - STATS_CACHE["timestamp"] < STATS_CACHE_TTL and STATS_CACHE["value"]:
+            return STATS_CACHE["value"]
 
-    cpu_usage = sample_cpu_percent()
+    cpu_usage = psutil.cpu_percent(interval=None)
 
-    mem_percent = 0.0
-    mem_total_gb = 0.0
-    mem_used_gb = 0.0
+    mem = psutil.virtual_memory()
+    mem_percent = round(mem.percent, 1)
+    mem_total_gb = round(mem.total / (1024 ** 3), 1)
+    mem_used_gb = round(mem.used / (1024 ** 3), 1)
+
     try:
-        mem_info = {}
-        with open("/proc/meminfo", "r", encoding="utf-8") as f:
-            for line in f:
-                p = line.split()
-                if len(p) >= 2:
-                    mem_info[p[0].rstrip(":")] = float(p[1])
-        total = mem_info.get("MemTotal", 1.0)
-        available = mem_info.get("MemAvailable")
-        if available is None:
-            free = mem_info.get("MemFree", 0.0)
-            buffers = mem_info.get("Buffers", 0.0)
-            cached = mem_info.get("Cached", 0.0)
-            available = free + buffers + cached
-        used = max(total - available, 0.0)
-        mem_percent = round((used / total) * 100, 1)
-        mem_total_gb = round(total / 1024 / 1024, 1)
-        mem_used_gb = round(used / 1024 / 1024, 1)
+        ip_address = socket.gethostbyname(socket.gethostname())
     except Exception:
-        pass
-
-    wsl_ip = "127.0.0.1"
-    try:
-        result = run_command(["hostname", "-I"], timeout=1.0)
-        ips = result.stdout.strip().split()
-        if ips:
-            wsl_ip = ips[0]
-    except Exception:
-        pass
+        ip_address = "127.0.0.1"
 
     uptime_sec = time.time() - START_TIME
     if uptime_sec < 60:
@@ -448,12 +475,13 @@ def get_system_stats_snapshot(force_refresh: bool = False) -> dict:
             "total_gb": mem_total_gb,
             "used_gb": mem_used_gb,
         },
-        "ip_address": wsl_ip,
+        "ip_address": ip_address,
         "uptime": uptime_str,
-        "os": "WSL (Ubuntu/Linux)",
+        "os": platform.system(),
     }
-    STATS_CACHE["timestamp"] = now
-    STATS_CACHE["value"] = snapshot
+    with STATS_CACHE_LOCK:
+        STATS_CACHE["timestamp"] = now
+        STATS_CACHE["value"] = snapshot
     return snapshot
 
 
@@ -510,11 +538,204 @@ def get_projects_snapshot(active_ports: Optional[List[dict]] = None) -> List[dic
     return [get_project_runtime_state(project, active_ports, pids_map) for project in projects]
 
 
+def check_http_port(port: int, timeout: float = 1.5) -> bool:
+    """Check if a port serves actual web content (not just HTTP protocol)."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect(('127.0.0.1', port))
+        sock.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nAccept: text/html,application/json,*/*\r\nConnection: close\r\n\r\n")
+
+        response = b""
+        while True:
+            try:
+                chunk = sock.recv(8192)
+                if not chunk:
+                    break
+                response += chunk
+                if len(response) > 65536:
+                    break
+            except socket.timeout:
+                break
+        sock.close()
+
+        if not response.startswith(b"HTTP/"):
+            return False
+
+        # Split headers and body
+        header_end = response.find(b"\r\n\r\n")
+        if header_end == -1:
+            return False
+
+        headers_raw = response[:header_end].decode("utf-8", errors="ignore").lower()
+        body = response[header_end + 4:]
+
+        # Check status code - reject 4xx/5xx (no real web content)
+        status_line = headers_raw.split("\r\n")[0]
+        try:
+            status_code = int(status_line.split(" ")[1])
+            if status_code >= 400:
+                return False
+        except (IndexError, ValueError):
+            return False
+
+        # Check Content-Type for web content
+        WEB_CONTENT_TYPES = ["text/html", "text/plain", "application/json", "application/xml", "application/javascript"]
+        for content_type in WEB_CONTENT_TYPES:
+            if content_type in headers_raw:
+                return True
+
+        # If no recognized content-type, check if body has HTML-like content
+        body_text = body[:2048].decode("utf-8", errors="ignore")
+        if "<html" in body_text.lower() or "<!doctype" in body_text.lower():
+            return True
+
+        return False
+    except Exception:
+        try:
+            sock.close()
+        except Exception:
+            pass
+        return False
+
+
+def categorize_process(process_name: str, ports: list) -> str:
+    """Categorize a process into user-facing groups."""
+    name = process_name.lower()
+    # Strip .exe suffix for cross-platform compatibility
+    name_no_ext = name.replace('.exe', '') if name.endswith('.exe') else name
+
+    # System/vendor services: should not be stopped
+    SYSTEM_PROCESSES = {
+        # Windows
+        'svchost.exe', 'csrss.exe', 'smss.exe', 'wininit.exe',
+        'winlogon.exe', 'lsass.exe', 'services.exe',
+        'vpnagent.exe', 'cer_service.exe', 'agentshell_guard.exe',
+        'asus_framework.exe', 'rogiveservice.exe', 'armourycrate.service.exe',
+        'rogliveservice.exe', 'alilangclient.exe',
+        'system', 'idle', 'memory compression', 'registry',
+        # Unix/macOS
+        'init', 'systemd', 'launchd', 'kernel_task',
+        'kthreadd', 'ksoftirqd', 'migration', 'kworker',
+        'dbus-daemon', 'polkitd', 'networkmanager',
+        'vpnagent', 'cer_service', 'agentshell_guard',
+    }
+    if name in SYSTEM_PROCESSES or name_no_ext in SYSTEM_PROCESSES:
+        return 'system'
+
+    # Network tools: proxies, VPNs
+    NETWORK_PROCESSES = {
+        # Windows
+        'verge-mihomo.exe', 'clash-verge-service.exe', 'clash-verge.exe',
+        'clash.exe', 'v2ray.exe', 'trojan.exe', 'ss-local.exe',
+        # Unix/macOS
+        'verge-mihomo', 'clash-verge-service', 'clash-verge',
+        'clash', 'v2ray', 'trojan', 'ss-local', 'ss-server',
+        'shadowsocks', 'trojan-go', 'xray',
+    }
+    if name in NETWORK_PROCESSES or name_no_ext in NETWORK_PROCESSES:
+        return 'network'
+
+    # Creative software
+    CREATIVE_PROCESSES = {
+        # Windows
+        'houdini.exe', 'nuke15.0.exe', 'nuke.exe',
+        'blender.exe', 'maya.exe', '3dsmax.exe', 'afterfx.exe',
+        'photoshop.exe', 'illustrator.exe',
+        # Unix/macOS
+        'houdini', 'nuke15.0', 'nuke',
+        'blender', 'maya', '3dsmax', 'afterfx',
+        'photoshop', 'illustrator', 'gimp', 'inkscape',
+        'davinci', 'fusion', 'cinema4d', 'c4d',
+    }
+    if name in CREATIVE_PROCESSES or name_no_ext in CREATIVE_PROCESSES:
+        return 'creative'
+
+    # License managers
+    if name in {'rlm.exe', 'rlm', 'flexnet', 'flexlm'}:
+        return 'system'
+
+    # Default: user apps
+    return 'user'
+
+
+def group_ports_by_process(ports: List[dict]) -> List[dict]:
+    """Group ports by PID, detect HTTP capability, return sorted list."""
+    from collections import defaultdict
+
+    groups = defaultdict(list)
+    for port_info in ports:
+        pid = port_info.get('pid')
+        if pid:
+            groups[pid].append(port_info)
+
+    result = []
+    for pid, port_list in groups.items():
+        # Sort ports by port number
+        port_list.sort(key=lambda p: p['port'])
+
+        # Detect HTTP capability for each port (in parallel)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            http_futures = {
+                executor.submit(check_http_port, p['port']): p
+                for p in port_list
+            }
+            for future in concurrent.futures.as_completed(http_futures):
+                port_info = http_futures[future]
+                try:
+                    port_info['is_http'] = future.result()
+                except Exception:
+                    port_info['is_http'] = False
+
+        # Find primary port (first HTTP port, or lowest port number)
+        http_ports = [p for p in port_list if p.get('is_http')]
+        primary = http_ports[0] if http_ports else port_list[0]
+
+        # Categorize process
+        category = categorize_process(primary.get('process', 'Unknown'), [p['port'] for p in port_list])
+
+        result.append({
+            'pid': pid,
+            'process_name': primary.get('process', 'Unknown'),
+            'cwd': primary.get('project_name', ''),
+            'ports': [p['port'] for p in port_list],
+            'primary_port': primary['port'],
+            'is_http': primary.get('is_http', False),
+            'category': category,
+            'port_count': len(port_list)
+        })
+
+    # Sort by: HTTP capability (yes first), then by primary port number
+    result.sort(key=lambda g: (not g['is_http'], g['primary_port']))
+    return result
+
+
+def is_system_port(port: int) -> bool:
+    """Check if a port is a known system/service port."""
+    SYSTEM_PORTS = {
+        7, 9, 13, 17, 19, 37, 53, 102, 111, 113, 119, 135, 137, 138, 139,
+        161, 162, 389, 445, 464, 500, 514, 515, 593, 636, 902, 912, 993,
+        995, 1714, 1715, 1745, 1900, 1928, 1929, 2049, 2100, 2869, 3306,
+        3389, 3702, 5355, 5357, 5432, 5666, 6379, 7680, 11434, 27017
+    }
+    return port in SYSTEM_PORTS
+
+
 def get_dashboard_snapshot(force_refresh: bool = False) -> dict:
-    ports = get_active_system_ports(force_refresh=force_refresh)
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        ports_future = pool.submit(get_active_system_ports, force_refresh)
+        stats_future = pool.submit(get_system_stats_snapshot, force_refresh)
+        ports = ports_future.result()
+        stats = stats_future.result()
+
+    # Group ports by process and detect HTTP capability
+    local_ports = [p for p in ports if p['port'] < 49152 and not is_system_port(p['port'])]
+    grouped_local_ports = group_ports_by_process(local_ports)
+
     return {
-        "stats": get_system_stats_snapshot(force_refresh=force_refresh),
+        "stats": stats,
         "system_ports": ports,
+        "grouped_local_ports": grouped_local_ports,
         "projects": get_projects_snapshot(active_ports=ports),
         "generated_at": int(time.time() * 1000),
     }
@@ -525,15 +746,8 @@ def parse_command(command: str) -> Tuple[List[str], dict]:
     if not stripped:
         raise HTTPException(status_code=400, detail="Command cannot be empty")
 
-    unsupported_shell_tokens = ["|", "&&", "||", ";", ">", "<", "$(", "`"]
-    if any(token in stripped for token in unsupported_shell_tokens):
-        raise HTTPException(
-            status_code=400,
-            detail="Command contains shell-only syntax. Please use a direct executable command without pipes, redirects, chaining, or subshells.",
-        )
-
     try:
-        parts = shlex.split(stripped)
+        parts = shlex.split(stripped, posix=not IS_WINDOWS)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid command syntax: {e}")
 
@@ -548,15 +762,57 @@ def parse_command(command: str) -> Tuple[List[str], dict]:
 
 
 def terminate_managed_pid(pid: int) -> bool:
+    if pid <= 4:
+        return False
+
     try:
-        pgid = os.getpgid(pid)
-        os.killpg(pgid, signal.SIGKILL)
-        return True
+        proc = psutil.Process(pid)
+        proc_name = proc.name().lower()
+
+        if IS_WINDOWS:
+            PROTECTED_PROCESSES = {
+                "svchost.exe", "csrss.exe", "smss.exe", "wininit.exe",
+                "winlogon.exe", "lsass.exe", "services.exe", "system",
+                "idle", "memory compression", "registry"
+            }
+        else:
+            PROTECTED_PROCESSES = {
+                "init", "systemd", "launchd", "kernel_task",
+                "kthreadd", "ksoftirqd", "migration", "kworker"
+            }
+
+        if proc_name in PROTECTED_PROCESSES:
+            print(f"Refused to kill protected system process: {proc_name} (PID {pid})")
+            return False
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+
+    try:
+        if IS_WINDOWS:
+            result = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, text=True, timeout=5.0
+            )
+            return result.returncode == 0
+        else:
+            # Unix: kill entire process group
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                # If process group kill fails, try killing the process directly
+                proc = psutil.Process(pid)
+                for child in proc.children(recursive=True):
+                    child.kill()
+                proc.kill()
+            return True
     except Exception:
         try:
-            os.kill(pid, signal.SIGKILL)
+            proc = psutil.Process(pid)
+            for child in proc.children(recursive=True):
+                child.kill()
+            proc.kill()
             return True
-        except Exception:
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
 
 
@@ -578,18 +834,18 @@ def get_missing_log_message(project_id: str) -> dict:
     if project_state and project_state["status"] == "external":
         process = project_state.get("port_process") or {}
         logs = (
-            f"=== PORT DASHBOARD 提示 ===\n"
-            f"项目 “{project['name']}”（端口 {project['port']}）目前处于【外部直接运行】状态。\n"
-            f"它当前的系统 PID 是 {process.get('pid')} (程序名: '{process.get('process', 'Unknown')}')。\n\n"
-            f"该进程不是由当前面板托管启动，因此无法捕获其控制台日志。\n\n"
-            f"如果要在这里看日志，请先手动停止外部进程，再用面板重新启动该项目。"
+            f"=== PORT DASHBOARD ===\n"
+            f"Project \"{project['name']}\" (port {project['port']}) is running externally.\n"
+            f"PID: {process.get('pid')} (process: '{process.get('process', 'Unknown')}')\n\n"
+            f"This process was not started by the dashboard, so logs are not captured.\n\n"
+            f"To capture logs, stop the external process and restart via the dashboard."
         )
         return {"logs": logs, "next_offset": 0, "truncated": False, "synthetic": True}
 
     logs = (
-        f"=== PORT DASHBOARD 提示 ===\n"
-        f"项目 “{project['name']}”（端口 {project['port']}）当前处于【停止状态】。\n\n"
-        f"尚未产生托管日志。点击“启动”后会开始记录输出。"
+        f"=== PORT DASHBOARD ===\n"
+        f"Project \"{project['name']}\" (port {project['port']}) is stopped.\n\n"
+        f"No logs yet. Click Start to begin capturing output."
     )
     return {"logs": logs, "next_offset": 0, "truncated": False, "synthetic": True}
 
@@ -610,20 +866,13 @@ def get_dashboard_snapshot_api(force: bool = False):
 
 
 @app.post("/api/system/ports/kill/{pid}")
-def kill_system_process(pid: int, platform: str = "wsl"):
-    if pid <= 1:
-        raise HTTPException(status_code=400, detail="Cannot kill system process 1")
-
-    if platform == "windows":
-        result = run_command([WINDOWS_TASKKILL, "/F", "/PID", str(pid)], timeout=3.0)
-        if result.returncode == 0:
-            invalidate_ports_cache()
-            return {"success": True, "message": f"Successfully killed Windows process PID {pid}!"}
-        raise HTTPException(status_code=500, detail=(result.stderr or result.stdout or f"Failed to kill Windows process {pid}").strip())
+def kill_system_process(pid: int):
+    if pid <= 4:
+        raise HTTPException(status_code=400, detail="Cannot kill system process")
 
     if terminate_managed_pid(pid):
         invalidate_ports_cache()
-        return {"success": True, "message": f"Killed PID {pid}"}
+        return {"success": True, "message": f"Killed process PID {pid}"}
     raise HTTPException(status_code=500, detail=f"Failed to kill process {pid}")
 
 
@@ -644,6 +893,7 @@ def create_project(project: Project):
 
 @app.put("/api/projects/{project_id}")
 def update_project(project_id: str, updated_project: Project):
+    project_id = validate_project_id(project_id)
     projects = load_projects()
     index = next((i for i, p in enumerate(projects) if p["id"] == project_id), -1)
     if index == -1:
@@ -655,6 +905,7 @@ def update_project(project_id: str, updated_project: Project):
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str):
+    project_id = validate_project_id(project_id)
     projects = load_projects()
     index = next((i for i, p in enumerate(projects) if p["id"] == project_id), -1)
     if index == -1:
@@ -670,6 +921,7 @@ def delete_project(project_id: str):
 
 @app.post("/api/projects/{project_id}/start")
 def start_project(project_id: str):
+    project_id = validate_project_id(project_id)
     projects = load_projects()
     project = next((p for p in projects if p["id"] == project_id), None)
     if not project:
@@ -695,7 +947,7 @@ def start_project(project_id: str):
         log_file = open(log_path, "w", encoding="utf-8")
         log_file.write(f"=== Starting project '{project['name']}' at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
         log_file.write(f"CWD: {cwd}\n")
-        log_file.write(f"Command: {' '.join(shlex.quote(part) for part in argv)}\n")
+        log_file.write(f"Command: {' '.join(argv)}\n")
         if env_overrides:
             log_file.write(f"Env Overrides: {json.dumps(env_overrides, ensure_ascii=False)}\n")
         log_file.write("===========================================================\n\n")
@@ -706,16 +958,30 @@ def start_project(project_id: str):
         sub_env["PYTHONUNBUFFERED"] = "1"
         sub_env["FORCE_COLOR"] = "1"
 
-        proc = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            preexec_fn=os.setsid,
-            env=sub_env,
-        )
+        # Platform-specific process creation
+        if IS_WINDOWS:
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            proc = subprocess.Popen(
+                argv,
+                cwd=cwd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                env=sub_env,
+                creationflags=creation_flags,
+            )
+        else:
+            # Unix: use start_new_session to create new process group
+            proc = subprocess.Popen(
+                argv,
+                cwd=cwd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                env=sub_env,
+                start_new_session=True,
+            )
 
         ACTIVE_PROCESSES[project_id] = proc
+        ACTIVE_LOG_FILES[project_id] = log_file
         pids_map = load_running_pids()
         pids_map[project_id] = {
             "pid": proc.pid,
@@ -735,6 +1001,7 @@ def start_project(project_id: str):
 
 @app.post("/api/projects/{project_id}/stop")
 def stop_project(project_id: str):
+    project_id = validate_project_id(project_id)
     projects = load_projects()
     project = next((p for p in projects if p["id"] == project_id), None)
     if not project:
@@ -760,6 +1027,13 @@ def stop_project(project_id: str):
     if not pid:
         return {"success": True, "message": "Project is not running (no managed process to stop)"}
 
+    log_file = ACTIVE_LOG_FILES.pop(project_id, None)
+    if log_file:
+        try:
+            log_file.close()
+        except Exception:
+            pass
+
     success = terminate_managed_pid(pid)
     pids_map.pop(project_id, None)
     save_running_pids(pids_map)
@@ -773,6 +1047,7 @@ def stop_project(project_id: str):
 
 @app.get("/api/projects/{project_id}/logs")
 def get_project_logs(project_id: str, offset: int = 0, limit: int = LOG_READ_CHUNK_SIZE):
+    project_id = validate_project_id(project_id)
     log_path = os.path.join(LOGS_DIR, f"{project_id}.log")
     if not os.path.exists(log_path):
         return get_missing_log_message(project_id)
@@ -810,6 +1085,7 @@ def get_project_logs(project_id: str, offset: int = 0, limit: int = LOG_READ_CHU
 
 @app.post("/api/projects/{project_id}/logs/clear")
 def clear_project_logs(project_id: str):
+    project_id = validate_project_id(project_id)
     log_path = os.path.join(LOGS_DIR, f"{project_id}.log")
     if os.path.exists(log_path):
         try:

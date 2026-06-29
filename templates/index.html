@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PORT DASHBOARD - 本地网页与应用端口控制中心</title>
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS (local) -->
+  <link href="/static/tailwind.min.css" rel="stylesheet">
   <!-- Vue 3 -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <style>
@@ -109,6 +109,14 @@
       background-color: #010a0a;
       border: 1px solid rgba(255, 230, 203, 0.2);
     }
+
+    @keyframes spin-once {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .spin-refresh {
+      animation: spin-once 0.6s ease-in-out;
+    }
   </style>
   <script>
     tailwind.config = {
@@ -152,17 +160,17 @@
         <div>
           <h1 class="text-2xl font-bold font-mono tracking-wider text-hermes-cream flex items-center gap-2">
             PORT DASHBOARD
-            <span class="text-xs font-normal border border-hermes-accent/40 text-hermes-accent px-1.5 py-0.5 rounded uppercase">WSL Engine</span>
+            <span class="text-xs font-normal border border-hermes-accent/40 text-hermes-accent px-1.5 py-0.5 rounded uppercase">Windows Engine</span>
           </h1>
           <p class="text-xs text-hermes-dimmed tracking-wide mt-1">本地服务端口及生命周期可视化控制台</p>
         </div>
       </div>
       
-      <!-- WSL 状态仪表盘 -->
+      <!-- 系统状态仪表盘 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs w-full md:w-auto font-mono">
         <!-- IP地址 -->
         <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
-          <span class="text-hermes-dimmed">WSL IP</span>
+          <span class="text-hermes-dimmed">本机 IP</span>
           <span class="text-hermes-accent font-semibold mt-0.5 flex items-center gap-1">
             <svg class="w-3 h-3 text-hermes-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
             {{ stats.ip_address }}
@@ -205,15 +213,22 @@
         <!-- 切换 Tab 按钮 & 高危操作安全锁 -->
         <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-hermes-cream/10 pb-3 mb-4 gap-3">
           <div class="flex space-x-2">
-            <button 
-              @click="activeTab = 'managed'" 
+            <button
+              @click="activeTab = 'managed'"
               :class="[activeTab === 'managed' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
               class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
             >
               ┊ 托管项目 ({{ projects.length }})
             </button>
-            <button 
-              @click="activeTab = 'system'" 
+            <button
+              @click="activeTab = 'local'"
+              :class="[activeTab === 'local' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
+              class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
+            >
+              ┊ 本地端口 ({{ groupedLocalPorts.length }})
+            </button>
+            <button
+              @click="activeTab = 'system'"
               :class="[activeTab === 'system' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
               class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
             >
@@ -242,15 +257,45 @@
           <!-- 操作与提示栏 -->
           <div class="flex justify-between items-center mb-4">
             <p class="text-xs text-hermes-dimmed font-mono">
-              在这里注册并托管您的网页项目，轻松实现 WSL 环境下一键快捷启闭
+              在这里注册并托管您的网页项目，轻松实现 Windows 环境下一键快捷启闭
+              <span class="text-hermes-dimmed/50 ml-1">(每 3s 自动刷新)</span>
+              <span v-if="!autoRefresh" class="text-hermes-dimmed/50 ml-1">(自动刷新已关闭)</span>
             </p>
-            <button 
-              @click="openAddProjectModal()" 
-              class="bg-hermes-accent text-hermes-teal font-semibold hover:bg-hermes-cream transition-all px-3 py-1.5 text-xs font-mono flex items-center gap-1.5 shadow-lg border border-hermes-cream/20"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-              新增托管项目
-            </button>
+            <div class="flex items-center gap-2">
+              <!-- 自动刷新开关 -->
+              <button
+                @click="toggleAutoRefresh()"
+                :class="[
+                  'px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all border',
+                  autoRefresh
+                    ? 'bg-hermes-accent/20 text-hermes-accent border-hermes-accent/40 hover:bg-hermes-accent/30'
+                    : 'text-hermes-dimmed border-hermes-dimmed/30 hover:border-hermes-dimmed hover:bg-hermes-dimmed/10'
+                ]"
+                :title="autoRefresh ? '点击关闭自动刷新' : '点击开启自动刷新'"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path v-if="autoRefresh" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                  <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                {{ autoRefresh ? '自动刷新：开' : '自动刷新：关' }}
+              </button>
+              <button
+                @click="manualRefresh()"
+                :disabled="snapshotLoading"
+                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream hover:bg-hermes-cream/10 px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="手动刷新端口状态"
+              >
+                <svg :class="['w-3.5 h-3.5', snapshotLoading ? 'animate-spin' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
+                刷新
+              </button>
+              <button 
+                @click="openAddProjectModal()" 
+                class="bg-hermes-accent text-hermes-teal font-semibold hover:bg-hermes-cream transition-all px-3 py-1.5 text-xs font-mono flex items-center gap-1.5 shadow-lg border border-hermes-cream/20"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                新增托管项目
+              </button>
+            </div>
           </div>
 
           <!-- 托管服务列表 -->
@@ -414,11 +459,186 @@
           </div>
         </div>
 
+        <!-- 本地端口面板 -->
+        <div v-if="activeTab === 'local'" class="flex-1 flex flex-col overflow-hidden">
+
+          <div class="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-3 mb-4">
+            <p class="text-xs text-hermes-dimmed font-mono">
+              自动检测你启动的所有本地应用端口（按进程分组）
+            </p>
+            <div class="flex items-center space-x-3 shrink-0">
+              <!-- 分类过滤按键组 -->
+              <div class="flex bg-black/60 rounded border border-hermes-cream/15 p-0.5 select-none shrink-0">
+                <button
+                  type="button"
+                  @click="toggleLocalCategory('all')"
+                  :class="[localCategoryFilter === 'all' ? 'bg-hermes-cream text-hermes-teal font-semibold' : 'text-hermes-dimmed hover:text-hermes-cream']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  全部 ({{ groupedLocalPorts.length }})
+                </button>
+                <button
+                  type="button"
+                  @click="toggleLocalCategory('user')"
+                  :class="[localCategoryFilter === 'user' ? 'bg-emerald-500 text-black font-semibold' : 'text-emerald-500/60 hover:text-emerald-400']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  我的应用 ({{ localCategoryCounts.user }})
+                </button>
+                <button
+                  type="button"
+                  @click="toggleLocalCategory('creative')"
+                  :class="[localCategoryFilter === 'creative' ? 'bg-violet-500 text-black font-semibold' : 'text-violet-500/60 hover:text-violet-400']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  创意软件 ({{ localCategoryCounts.creative }})
+                </button>
+                <button
+                  type="button"
+                  @click="toggleLocalCategory('network')"
+                  :class="[localCategoryFilter === 'network' ? 'bg-blue-500 text-black font-semibold' : 'text-blue-500/60 hover:text-blue-400']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  网络工具 ({{ localCategoryCounts.network }})
+                </button>
+                <button
+                  type="button"
+                  @click="toggleLocalCategory('system')"
+                  :class="[localCategoryFilter === 'system' ? 'bg-stone-500 text-black font-semibold' : 'text-stone-500/60 hover:text-stone-400']"
+                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                >
+                  系统服务 ({{ localCategoryCounts.system }})
+                </button>
+              </div>
+
+              <button
+                @click="manualRefresh()"
+                :disabled="snapshotLoading"
+                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream hover:bg-hermes-cream/10 px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="手动刷新"
+              >
+                <svg :class="['w-3.5 h-3.5', snapshotLoading ? 'animate-spin' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
+                刷新
+              </button>
+            </div>
+          </div>
+
+          <!-- 本地端口列表（按进程分组） -->
+          <div class="flex-1 overflow-y-auto pr-1">
+            <!-- 空状态 -->
+            <div v-if="filteredLocalPorts.length === 0" class="flex flex-col items-center justify-center h-64 text-hermes-dimmed font-mono">
+              <svg class="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+              <p class="text-sm">暂无本地应用端口</p>
+              <p class="text-xs mt-1 opacity-60">启动你的应用后会自动显示在这里</p>
+            </div>
+
+            <!-- 分组进程列表 -->
+            <div v-else class="space-y-2">
+              <div
+                v-for="group in filteredLocalPorts"
+                :key="group.pid"
+                class="bg-hermes-card/80 border border-hermes-cream/10 rounded-lg p-4 hover:border-hermes-cream/30 transition-all"
+              >
+                <div class="flex items-center justify-between">
+                  <!-- 左：进程信息 -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-3 mb-1">
+                      <!-- HTTP 标识 -->
+                      <span v-if="group.is_http" class="bg-emerald-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded">HTTP</span>
+                      <span v-else class="bg-stone-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">RPC</span>
+
+                      <!-- 分类标识 -->
+                      <span v-if="group.category === 'user'" class="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-500/30">我的应用</span>
+                      <span v-else-if="group.category === 'creative'" class="bg-violet-500/20 text-violet-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-violet-500/30">创意软件</span>
+                      <span v-else-if="group.category === 'network'" class="bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-500/30">网络工具</span>
+                      <span v-else-if="group.category === 'system'" class="bg-stone-500/20 text-stone-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-stone-500/30">系统服务</span>
+
+                      <!-- 主端口 -->
+                      <span class="text-hermes-accent font-mono font-bold text-lg">{{ group.primary_port }}</span>
+
+                      <!-- 进程名 -->
+                      <span v-if="group.cwd" class="text-hermes-cream text-sm font-semibold truncate">{{ group.cwd.split('\\').pop() || group.process_name }}</span>
+                      <span v-else class="text-hermes-cream text-sm font-medium truncate">{{ group.process_name }}</span>
+
+                      <!-- 进程名括号 -->
+                      <span class="text-hermes-dimmed text-xs font-mono">({{ group.process_name }})</span>
+                    </div>
+
+                    <!-- 端口列表 -->
+                    <div class="text-hermes-dimmed text-xs font-mono">
+                      <span v-if="group.ports.length === 1">
+                        端口 {{ group.ports[0] }}
+                      </span>
+                      <span v-else>
+                        {{ group.ports.length }} 个端口:
+                        <span class="text-hermes-cream/70">{{ group.ports.slice(0, 5).join(', ') }}</span>
+                        <span v-if="group.ports.length > 5">...</span>
+                      </span>
+                      · PID {{ group.pid }}
+                    </div>
+
+                    <!-- 安全评估与功能释义 -->
+                    <div class="flex items-center gap-2 mt-1">
+                      <span
+                        class="text-[10px] border px-1.5 py-0.2 rounded font-bold shrink-0"
+                        :class="[getPortSafetyInfo(group.primary_port, group.process_name).colorClass]"
+                      >
+                        {{ getPortSafetyInfo(group.primary_port, group.process_name).label }}
+                      </span>
+                      <span
+                        class="text-hermes-dimmed truncate block hover:text-hermes-cream text-[11px] cursor-help"
+                        :title="getPortSafetyInfo(group.primary_port, group.process_name).desc"
+                      >
+                        {{ getPortSafetyInfo(group.primary_port, group.process_name).desc }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- 右：操作按钮 -->
+                  <div class="flex items-center gap-2 shrink-0 ml-4">
+                    <!-- 打开按钮（仅 HTTP 服务） -->
+                    <button
+                      v-if="group.is_http"
+                      @click="openPortPage(group.primary_port)"
+                      class="bg-hermes-accent/15 hover:bg-hermes-accent hover:text-hermes-teal text-hermes-accent border border-hermes-accent/40 px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
+                      :title="`访问 http://localhost:${group.primary_port}`"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
+                      打开
+                    </button>
+
+                    <!-- 导入托管（仅 HTTP 服务且未托管） -->
+                    <button
+                      v-if="group.is_http && !isPortManaged(group.primary_port)"
+                      @click="quickImportPort({ port: group.primary_port, process: group.process_name, pid: group.pid })"
+                      class="bg-hermes-card hover:bg-hermes-cream hover:text-hermes-teal text-hermes-cream border border-hermes-cream/20 px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                      导入托管
+                    </button>
+
+                    <!-- 终止进程 -->
+                    <button
+                      v-if="!safetyLock"
+                      @click="killProcess(group.pid, group.primary_port, 'windows')"
+                      class="bg-rose-950/30 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
+                      title="终止此进程"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                      终止
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 全局端口面板 -->
         <div v-if="activeTab === 'system'" class="flex-1 flex flex-col overflow-hidden">
           
           <div class="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-3 mb-4 font-mono text-xs">
-            <span class="text-hermes-dimmed">实时扫描 WSL 实例内当前处于 LISTEN (监听) 状态的所有 TCP 端口进程</span>
+            <span class="text-hermes-dimmed">实时扫描本机当前处于 LISTEN (监听) 状态的所有 TCP 端口进程</span>
             <div class="flex items-center space-x-3 shrink-0">
               <!-- 过滤按键组 -->
               <div class="flex bg-black/60 rounded border border-hermes-cream/15 p-0.5 select-none shrink-0">
@@ -458,10 +678,11 @@
 
               <!-- 刷新按键 -->
               <button 
-                @click="fetchSystemPorts()" 
-                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer text-[10px]"
+                @click="manualRefresh()" 
+                :disabled="snapshotLoading"
+                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 15H17.5"></path></svg>
+                <svg :class="['w-3 h-3', snapshotLoading ? 'animate-spin' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
                 刷新
               </button>
             </div>
@@ -560,7 +781,7 @@
                     <!-- 强杀进程按钮 -->
                     <button 
                       v-if="port.pid && port.safety.level !== 'danger'"
-                      @click="killProcess(port.pid, port.port, port.platform || 'wsl')"
+                      @click="killProcess(port.pid, port.port, port.platform || 'windows')"
                       class="bg-rose-950/30 border border-rose-900 hover:bg-rose-900 text-rose-200 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
                     >
                       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -731,7 +952,7 @@
               class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
             >
             <p class="text-[10px] text-hermes-dimmed/70 mt-1">
-              Linux 目录路径。例如：WSL 本地 G 盘挂载路径为 /mnt/g/... 宿主机用户主目录为 /home/yaopc
+              Windows 目录路径。例如：G:\projects\my-app 或 C:\Users\admin\projects
             </p>
           </div>
 
@@ -796,7 +1017,9 @@
         const activeTab = ref('managed');
         const projects = ref([]);
         const systemPorts = ref([]);
+        const groupedLocalPortsData = ref([]);
         const safetyFilter = ref('all');
+        const localCategoryFilter = ref(localStorage.getItem('localCategoryFilter') || 'user');
         const safetyLock = ref(true);
         const stats = ref({});
         const loadingStates = reactive({});
@@ -821,6 +1044,29 @@
         });
 
         let snapshotIntervalId = null;
+        const autoRefresh = ref(localStorage.getItem('autoRefresh') !== 'false');
+
+        const startAutoRefresh = () => {
+          if (snapshotIntervalId) clearInterval(snapshotIntervalId);
+          snapshotIntervalId = setInterval(refreshDashboard, 3000);
+        };
+
+        const stopAutoRefresh = () => {
+          if (snapshotIntervalId) {
+            clearInterval(snapshotIntervalId);
+            snapshotIntervalId = null;
+          }
+        };
+
+        const toggleAutoRefresh = () => {
+          autoRefresh.value = !autoRefresh.value;
+          localStorage.setItem('autoRefresh', autoRefresh.value);
+          if (autoRefresh.value) {
+            startAutoRefresh();
+          } else {
+            stopAutoRefresh();
+          }
+        };
 
         const filteredSystemPorts = computed(() => {
           if (safetyFilter.value === 'all') {
@@ -830,6 +1076,35 @@
             return port.safety.level === safetyFilter.value;
           });
         });
+
+        const groupedLocalPorts = computed(() => {
+          // This data now comes directly from the API (grouped_local_ports)
+          return groupedLocalPortsData.value;
+        });
+
+        const filteredLocalPorts = computed(() => {
+          if (localCategoryFilter.value === 'all') {
+            return groupedLocalPorts.value;
+          }
+          return groupedLocalPorts.value.filter(group => group.category === localCategoryFilter.value);
+        });
+
+        const localCategoryCounts = computed(() => {
+          const counts = { user: 0, creative: 0, network: 0, system: 0 };
+          for (const group of groupedLocalPorts.value) {
+            const category = group.category || 'user';
+            if (counts[category] !== undefined) {
+              counts[category] += 1;
+            }
+          }
+          return counts;
+        });
+
+        // Watch localCategoryFilter and persist to localStorage
+        const toggleLocalCategory = (category) => {
+          localCategoryFilter.value = category;
+          localStorage.setItem('localCategoryFilter', category);
+        };
 
         const safetyCounts = computed(() => {
           const counts = { safe: 0, warning: 0, danger: 0 };
@@ -871,6 +1146,7 @@
             ...port,
             safety: getPortSafetyInfo(port.port, port.process)
           }));
+          groupedLocalPortsData.value = data.grouped_local_ports || [];
           projects.value = data.projects || [];
 
           if (activeLogProject.value) {
@@ -897,6 +1173,10 @@
         };
 
         const fetchSystemPorts = async () => {
+          await refreshDashboard(true);
+        };
+
+        const manualRefresh = async () => {
           await refreshDashboard(true);
         };
 
@@ -945,7 +1225,7 @@
           return projects.value.some(p => p.port === port);
         };
 
-        const killProcess = async (pid, port, platform = 'wsl') => {
+        const killProcess = async (pid, port, platform = 'windows') => {
           const portObj = systemPorts.value.find(p => p.pid === pid && p.port === port && p.platform === platform);
           const processName = portObj ? portObj.process : 'Unknown';
           const safety = getPortSafetyInfo(port, processName);
@@ -1208,7 +1488,9 @@
 
         onMounted(() => {
           refreshDashboard(true);
-          snapshotIntervalId = setInterval(refreshDashboard, 3000);
+          if (autoRefresh.value) {
+            startAutoRefresh();
+          }
         });
 
         onBeforeUnmount(() => {
@@ -1307,7 +1589,7 @@
             level = 'warning';
             label = '自卫';
             colorClass = 'text-cyan-400 bg-cyan-950/40 border-cyan-800/40';
-            baseDesc = '当前端口控制面板本身！若将其强杀，网页会立即断开连接，需要重新登录 WSL 启动服务。';
+            baseDesc = '当前端口控制面板本身！若将其强杀，网页会立即断开连接，需要重新启动服务。';
           }
 
           const specificDesc = getPortExplanation(p, proc);
@@ -1321,8 +1603,13 @@
           projects,
           systemPorts,
           safetyFilter,
+          localCategoryFilter,
           safetyLock,
           filteredSystemPorts,
+          groupedLocalPorts,
+          filteredLocalPorts,
+          localCategoryCounts,
+          toggleLocalCategory,
           safetyCounts,
           stats,
           loadingStates,
@@ -1352,6 +1639,10 @@
           saveProject,
           deleteProject,
           fetchSystemPorts,
+          manualRefresh,
+          snapshotLoading,
+          autoRefresh,
+          toggleAutoRefresh,
           projectStatusMeta,
           buildPortUrl,
           openPortPage,

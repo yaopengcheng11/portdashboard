@@ -1,0 +1,2 @@
+[console_scripts]
+cli-anything-portdashboard = cli_anything.portdashboard.portdashboard_cli:cli

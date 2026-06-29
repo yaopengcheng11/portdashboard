@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: cli-anything-portdashboard
+Version: 1.0.0
+Summary: Agent-native CLI for Port Dashboard — local service and port management
+Author: CLI-Anything Community
+License: Apache-2.0
+Requires-Python: >=3.10
+Requires-Dist: click>=8.0
+Requires-Dist: requests>=2.28
+Provides-Extra: repl
+Requires-Dist: prompt_toolkit>=3.0; extra == "repl"
+Dynamic: author
+Dynamic: license
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
