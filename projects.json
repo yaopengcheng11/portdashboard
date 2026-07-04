@@ -14,5 +14,13 @@
     "command": "hermes dashboard --no-open --port 9119",
     "port": 9119,
     "description": "Hermes 官方自带的管理面板，负责配置、密钥、会话等监控"
+  },
+  {
+    "id": "nexart-workflow",
+    "name": "NexArt AI Workflow",
+    "cwd": "G:\\AITOOLS\\NexArtWorkFlow",
+    "command": "npm run dev",
+    "port": 3000,
+    "description": "基于 React Flow 与 Vite 的可视化 AI 提示词工程和创意工作流开发环境"
   }
 ]
