@@ -47,6 +47,18 @@
 - **动态 CORS 配置**：自动放行当前监听端口的跨域请求
 - **分类过滤**：快速筛选不同类型的进程
 
+### ⚙️ 用户偏好与设置面板
+- **服务端持久化** —— `GET/PUT /api/preferences` 读写 `mydashboard-config.json`,跨会话保留
+- **可配置项**:
+  - `theme`: `dark-emerald` / `blueprint`
+  - `default_category`: `all` / `user` / `creative`
+  - `auto_refresh` + `refresh_interval` (3 / 5 / 10 / 15 / 30 / 60 秒)
+  - `port`: 服务绑定端口(下次启动生效,默认 `9229`)
+- **服务端默认值兜底** —— 启动时读取偏好文件,UI 在首次渲染前就用服务端默认值 hydrate,杜绝 FOUC
+- **HTML 缓存控制** —— 仪表板 HTML 设 `Cache-Control: no-store`,改了 `app.py` 强制刷新就能看到
+
+> 视觉规范见 [`DESIGN.md`](./DESIGN.md)(Cyberpunk CRT 主题 / 字体 / 组件 token)
+
 ---
 
 ## 跨平台支持
@@ -172,6 +184,15 @@ start.bat dev      # 开发模式（热重载）
 | `/api/projects/{id}/logs` | GET | 历史日志（分页） |
 | `/api/projects/{id}/logs/stream` | GET | **SSE 流式**新日志（实时推送） |
 | `/api/projects/{id}/logs/clear` | POST | 清除日志 |
+
+### 偏好 (设置面板)
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/preferences` | GET | 读取当前偏好 + 服务端默认值,返回 `{ "preferences": {...}, "defaults": {...} }` |
+| `/api/preferences` | PUT | 整体替换(原子写) + schema 校验,非法值返回 422 |
+
+存储位置：`mydashboard-config.json`(项目根目录,运行时不需手动编辑)。
 
 ---
 
@@ -376,6 +397,19 @@ MIT License
 - ✨ **`dashboard_project` 字段** —— `/api/system/ports` 每条端口标记"是否由本面板管理"
 
 **代码结构：**
-- 🔧 拆分 `_parse_ports_netstat`（c=26→1, cog=97→1）→ 新文件 `port_parser.py`
-- 🔧 拆分 `check_http_port`（c=17→1, cog=46→1）→ 新文件 `http_probe.py`
+- 🔧 拆分 `_parse_ports_netstat`(c=26→1, cog=97→1)→ 新文件 `port_parser.py`
+- 🔧 拆分 `check_http_port`(c=17→1, cog=46→1)→ 新文件 `http_probe.py`
+
+### v2026.07-2 — 用户偏好 + 设计规范
+
+**新功能：**
+- ✨ **设置面板 (`/api/preferences`)** —— 主题 / 默认分类 / 自动刷新 / 刷新间隔 / 绑定端口,服务端 `mydashboard-config.json` 持久化
+- ✨ **服务端默认值 hydrate** —— UI 首屏渲染前就有 theme/refresh 配置,避免 FOUC
+- ✨ **HTML `Cache-Control: no-store`** —— 仪表板强制不走缓存,改后端代码即可见
+
+**设计规范：**
+- 📐 新增 `DESIGN.md` —— Cyberpunk CRT 终端主题(深绿 #041c1c + 奶油白 #FFE6CB + 琥珀 #FFBD38)+ JetBrains Mono 字体 + 组件 token
+
+**仓库整理：**
+- 🔧 `.gitignore` 加 `mydashboard-config.json` / `.hermes/` / `*.bak-*` / `static/vue.global.prod.js` 等 7 条,避免本地污染
 - 🔧 总 LOC：1116 → 1500（含新功能 + 两个独立模块）
