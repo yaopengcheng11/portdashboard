@@ -87,6 +87,8 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 PROJECTS_FILE = os.path.join(BASE_DIR, "projects.json")
 RUNNING_PIDS_FILE = os.path.join(BASE_DIR, "running_pids.json")
+PREFERENCES_FILE = os.path.join(BASE_DIR, "mydashboard-config.json")
+DEFAULT_PORT = 9229
 PORTS_CACHE_TTL = 3.0
 STATS_CACHE_TTL = 2.0
 LOG_READ_CHUNK_SIZE = 64 * 1024
@@ -1097,20 +1099,151 @@ def clear_project_logs(project_id: str):
     return {"success": True}
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 def serve_dashboard():
     html_path = os.path.join(BASE_DIR, "templates", "index.html")
     if not os.path.exists(html_path):
         raise HTTPException(status_code=404, detail="Dashboard UI (index.html) not found")
     try:
         with open(html_path, "r", encoding="utf-8") as f:
-            return f.read()
+            body = f.read()
+        headers = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+        return HTMLResponse(content=body, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading dashboard file: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# User preferences (settings panel)
+# Stored server-side in mydashboard-config.json so values like 'port' survive
+# across sessions and restart. Theme/auto-refresh/refresh-interval are also
+# read here at boot so the UI hydrates from server defaults before paint.
+# ---------------------------------------------------------------------------
+
+ALLOWED_THEMES = {"dark-emerald", "blueprint"}
+ALLOWED_CATEGORIES = {"all", "user", "creative"}
+ALLOWED_REFRESH_INTERVALS = (3, 5, 10, 15, 30, 60)
+
+DEFAULT_PREFERENCES = {
+    "theme": "dark-emerald",
+    "default_category": "user",
+    "auto_refresh": True,
+    "refresh_interval": 5,         # seconds
+    "port": DEFAULT_PORT,          # binding port; takes effect after restart
+}
+
+# Set by __main__ right before uvicorn.run() binds the socket.
+# Before then, falls back to DEFAULT_PORT so import-time reads are safe.
+RUNNING_PORT: int = DEFAULT_PORT
+
+
+def _coerce_preferences(raw: dict) -> dict:
+    """Merge user-provided values onto DEFAULT_PREFERENCES, dropping garbage."""
+    out = dict(DEFAULT_PREFERENCES)
+    if not isinstance(raw, dict):
+        return out
+    if raw.get("theme") in ALLOWED_THEMES:
+        out["theme"] = raw["theme"]
+    if raw.get("default_category") in ALLOWED_CATEGORIES:
+        out["default_category"] = raw["default_category"]
+    if isinstance(raw.get("auto_refresh"), bool):
+        out["auto_refresh"] = raw["auto_refresh"]
+    try:
+        iv = int(raw.get("refresh_interval"))
+        if iv in ALLOWED_REFRESH_INTERVALS:
+            out["refresh_interval"] = iv
+    except (TypeError, ValueError):
+        pass
+    try:
+        p = int(raw.get("port"))
+        if 1 <= p <= 65535 and p != DEFAULT_PORT:
+            # Non-default ports are stored; default value is implicit.
+            out["port"] = p
+        elif p == DEFAULT_PORT:
+            out["port"] = DEFAULT_PORT
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def load_preferences() -> dict:
+    """Read preferences from disk, falling back to defaults on any error."""
+    if not os.path.exists(PREFERENCES_FILE):
+        return dict(DEFAULT_PREFERENCES)
+    try:
+        with open(PREFERENCES_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return _coerce_preferences(raw)
+    except Exception:
+        return dict(DEFAULT_PREFERENCES)
+
+
+def save_preferences(prefs: dict) -> dict:
+    """Persist coerced preferences; uses atomic_write_json for crash safety."""
+    coerced = _coerce_preferences(prefs)
+    atomic_write_json(PREFERENCES_FILE, coerced)
+    return coerced
+
+
+@app.get("/api/preferences")
+def get_preferences():
+    """Return current preferences + the actually-running port.
+
+    `running_port` is set by __main__ right before uvicorn.run(); before that
+    (e.g. during tests or import) it falls back to DEFAULT_PORT.
+    """
+    prefs = load_preferences()
+    return {
+        "preferences": prefs,
+        "running_port": RUNNING_PORT,
+        "defaults": DEFAULT_PREFERENCES,
+        "allowed": {
+            "themes": sorted(ALLOWED_THEMES),
+            "categories": sorted(ALLOWED_CATEGORIES),
+            "refresh_intervals": list(ALLOWED_REFRESH_INTERVALS),
+        },
+    }
+
+
+@app.put("/api/preferences")
+def update_preferences(prefs: dict):
+    """Update one or more preference fields. Port change requires restart."""
+    if not isinstance(prefs, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    current = load_preferences()
+    merged = {**current, **prefs}
+    saved = save_preferences(merged)
+    port_changed = "port" in prefs and prefs.get("port") != current.get("port")
+    return {
+        "success": True,
+        "preferences": saved,
+        "requires_restart": port_changed,
+        "message": "Restart required for port change to take effect." if port_changed else None,
+    }
+
+
+
 
 
 if __name__ == "__main__":
     import uvicorn
 
+    # Prefer env var > preferences file > 9229 default.
+    # NOTE: changing this requires a server restart — the port is bound once.
+    def _resolve_bind_port() -> int:
+        env_port = os.environ.get("MYDASHBOARD_PORT")
+        if env_port and env_port.isdigit():
+            return int(env_port)
+        try:
+            prefs = load_preferences()
+            file_port = prefs.get("port")
+            if isinstance(file_port, int) and 1 <= file_port <= 65535:
+                return file_port
+        except Exception:
+            pass
+        return DEFAULT_PORT
+
     reload_enabled = os.environ.get("PORT_DASHBOARD_RELOAD", "0") == "1"
-    uvicorn.run("app:app", host="0.0.0.0", port=9229, reload=reload_enabled)
+    bind_port = _resolve_bind_port()
+    print(f"[mydashboard] binding to 0.0.0.0:{bind_port} (set MYDASHBOARD_PORT=... to override)")
+    uvicorn.run("app:app", host="0.0.0.0", port=bind_port, reload=reload_enabled)

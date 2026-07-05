@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 logs/*.log
 running_pids.json
+.hermes/
+mydashboard-config.json
+projects.json.bak-*
+projects.json.pre-pull-backup
+running_pids.json.pre-pull-backup
+static/vue.global.prod.js
