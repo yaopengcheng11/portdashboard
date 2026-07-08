@@ -48,16 +48,27 @@
 - **分类过滤**：快速筛选不同类型的进程
 
 ### ⚙️ 用户偏好与设置面板
-- **服务端持久化** —— `GET/PUT /api/preferences` 读写 `mydashboard-config.json`,跨会话保留
-- **可配置项**:
-  - `theme`: `dark-emerald` / `blueprint`
-  - `default_category`: `all` / `user` / `creative`
-  - `auto_refresh` + `refresh_interval` (3 / 5 / 10 / 15 / 30 / 60 秒)
-  - `port`: 服务绑定端口(下次启动生效,默认 `9229`)
-- **服务端默认值兜底** —— 启动时读取偏好文件,UI 在首次渲染前就用服务端默认值 hydrate,杜绝 FOUC
-- **HTML 缓存控制** —— 仪表板 HTML 设 `Cache-Control: no-store`,改了 `app.py` 强制刷新就能看到
 
-> 视觉规范见 [`DESIGN.md`](./DESIGN.md)(Cyberpunk CRT 主题 / 字体 / 组件 token)
+点击 header 右侧 **SETTING** 按钮打开设置弹窗，2 栏布局（左侧 200px 导航 + 右侧内容区，居中 720px × 80vh）：
+
+| 分区 | 内容 |
+|------|------|
+| **主题 THEME** | 7 种配色（详见下方），点击立即切换并持久化 |
+| **外观 APPEARANCE** | CRT 扫描线效果 toggle |
+| **刷新 REFRESH** | 自动刷新 toggle + 刷新间隔（3 / 5 / 10 / 15 / 30 / 60 秒） |
+| **默认视图 DEFAULTS** | 默认分类（all / user / creative）+ 默认标签页（managed / local / system） |
+| **高级 ADVANCED** | 控制台绑定端口（修改需重启）+ 恢复默认设置 |
+
+- **服务端持久化** —— `GET/PUT /api/preferences` 读写 `mydashboard-config.json`，跨会话保留
+- **可配置项**：
+  - `theme`: `dark-emerald` / `blueprint` / `midnight` / `arctic` / `terra` / `neon` / `velvet`
+  - `default_category`: `all` / `user` / `creative`
+  - `auto_refresh` (bool) + `refresh_interval` (3 / 5 / 10 / 15 / 30 / 60 秒)
+  - `port`: 服务绑定端口（下次启动生效，默认 `9229`）
+- **服务端默认值兜底** —— 启动时读取偏好文件，UI 在首次渲染前就用服务端默认值 hydrate，杜绝 FOUC
+- **HTML 缓存控制** —— 仪表板 HTML 设 `Cache-Control: no-store`，改了 `app.py` 强制刷新就能看到
+
+> 视觉规范见 [`DESIGN.md`](./DESIGN.md)（Cyberpunk CRT 主题 / 字体 / 组件 token）
 
 ---
 
@@ -190,7 +201,7 @@ start.bat dev      # 开发模式（热重载）
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/preferences` | GET | 读取当前偏好 + 服务端默认值,返回 `{ "preferences": {...}, "defaults": {...} }` |
-| `/api/preferences` | PUT | 整体替换(原子写) + schema 校验,非法值返回 422 |
+| `/api/preferences` | PUT | **浅层 merge** 当前偏好 + 提交 patch（原子写）。非法键被 `_coerce_preferences` 静默丢弃，不会 422。改 `port` 字段时返回 `requires_restart: true` |
 
 存储位置：`mydashboard-config.json`(项目根目录,运行时不需手动编辑)。
 
@@ -404,6 +415,7 @@ MIT License
 
 **新功能：**
 - ✨ **设置面板 (`/api/preferences`)** —— 主题 / 默认分类 / 自动刷新 / 刷新间隔 / 绑定端口,服务端 `mydashboard-config.json` 持久化
+- ✨ **设置面板 UI 落地** —— header 右侧 `SETTING` 按钮，2 栏布局弹窗（200px 导航 + 内容区，720px 居中，80vh 高度），5 个分区（主题/外观/刷新/默认视图/高级），7 个主题实时切换（dark-emerald / blueprint / midnight / arctic / terra / neon / velvet），所有偏好改动即时持久化到后端
 - ✨ **服务端默认值 hydrate** —— UI 首屏渲染前就有 theme/refresh 配置,避免 FOUC
 - ✨ **HTML `Cache-Control: no-store`** —— 仪表板强制不走缓存,改后端代码即可见
 
