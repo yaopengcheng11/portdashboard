@@ -1192,7 +1192,7 @@ def serve_dashboard():
 # read here at boot so the UI hydrates from server defaults before paint.
 # ---------------------------------------------------------------------------
 
-ALLOWED_THEMES = {"dark-emerald", "blueprint"}
+ALLOWED_THEMES = {"dark-emerald", "blueprint", "midnight", "arctic", "terra", "neon", "velvet"}
 ALLOWED_CATEGORIES = {"all", "user", "creative"}
 ALLOWED_REFRESH_INTERVALS = (3, 5, 10, 15, 30, 60)
 

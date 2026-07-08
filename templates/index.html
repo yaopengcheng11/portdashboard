@@ -139,6 +139,58 @@
       }
     }
   </script>
+  <script>
+/* theme variable maps */
+const THEME_VARIABLES = {
+  'dark-emerald': {
+    '--background': '#041c1c', '--midground': '#ffe6cb', '--glow-color': 'rgba(255, 189, 56, 0.35)',
+    '--card-bg': '#062a2a', '--card-border': 'rgba(255, 230, 203, 0.15)',
+    '--accent': '#ffbd38', '--dimmed': '#a59381', '--label': 'Emerald'
+  },
+  'blueprint': {
+    '--background': '#0a1628', '--midground': '#e2e8f0', '--glow-color': 'rgba(56, 189, 248, 0.35)',
+    '--card-bg': '#0f2236', '--card-border': 'rgba(226, 232, 240, 0.15)',
+    '--accent': '#38bdf8', '--dimmed': '#94a3b8', '--label': 'Blueprint'
+  },
+  'midnight': {
+    '--background': '#0c0f1a', '--midground': '#e0e7ff', '--glow-color': 'rgba(129, 140, 248, 0.35)',
+    '--card-bg': '#151929', '--card-border': 'rgba(224, 231, 255, 0.15)',
+    '--accent': '#818cf8', '--dimmed': '#a5b4fc', '--label': 'Midnight'
+  },
+  'arctic': {
+    '--background': '#f1f5f9', '--midground': '#0f172a', '--glow-color': 'rgba(13, 148, 136, 0.30)',
+    '--card-bg': '#ffffff', '--card-border': 'rgba(15, 23, 42, 0.12)',
+    '--accent': '#0d9488', '--dimmed': '#475569', '--label': 'Arctic'
+  },
+  'terra': {
+    '--background': '#1a1410', '--midground': '#f5e6d3', '--glow-color': 'rgba(201, 100, 66, 0.35)',
+    '--card-bg': '#241a14', '--card-border': 'rgba(245, 230, 211, 0.15)',
+    '--accent': '#c96442', '--dimmed': '#a89381', '--label': 'Terra'
+  },
+  'neon': {
+    '--background': '#000000', '--midground': '#00ff41', '--glow-color': 'rgba(0, 255, 65, 0.40)',
+    '--card-bg': '#0a0a0a', '--card-border': 'rgba(0, 255, 65, 0.20)',
+    '--accent': '#00ff41', '--dimmed': '#008f24', '--label': 'Neon'
+  },
+  'velvet': {
+    '--background': '#161219', '--midground': '#f5e1ee', '--glow-color': 'rgba(232, 160, 191, 0.35)',
+    '--card-bg': '#1f1a23', '--card-border': 'rgba(245, 225, 238, 0.15)',
+    '--accent': '#e8a0bf', '--dimmed': '#b89cb0', '--label': 'Velvet'
+  }
+};
+
+/* application helper */
+function applyTheme(themeId) {
+  const vars = THEME_VARIABLES[themeId];
+  if (!vars) return;
+  const root = document.documentElement;
+  Object.entries(vars).forEach(([k, v]) => {
+    if (k !== '--label') root.style.setProperty(k, v);
+  });
+  /* tailwind theme name reference (hermes-* classes still resolve via static config) */
+  document.body.dataset.theme = themeId;
+}
+  </script>
 </head>
 <body class="h-full crt-overlay">
   <div class="ambient-glow"></div>
@@ -158,14 +210,26 @@
           <div class="absolute -bottom-1 -right-1 w-2 h-2 bg-hermes-accent"></div>
         </div>
         <div>
-          <h1 class="text-2xl font-bold font-mono tracking-wider text-hermes-cream flex items-center gap-2">
+          <h1 class="text-2xl font-bold font-mono tracking-wider text-hermes-cream">
             PORT DASHBOARD
-            <span class="text-xs font-normal border border-hermes-accent/40 text-hermes-accent px-1.5 py-0.5 rounded uppercase">Windows Engine</span>
           </h1>
           <p class="text-xs text-hermes-dimmed tracking-wide mt-1">本地服务端口及生命周期可视化控制台</p>
         </div>
       </div>
       
+      <!-- Settings 入口按钮 -->
+      <button
+        @click="showSettingsModal = true; activeSettingsSection = 'theme';"
+        class="text-[var(--midground)] border border-[var(--card-border)] hover:bg-[var(--card-border)] px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all cursor-pointer shrink-0"
+        title="Settings / 设置"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+        </svg>
+        SETTING
+      </button>
+
       <!-- 系统状态仪表盘 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs w-full md:w-auto font-mono">
         <!-- IP地址 -->
@@ -876,6 +940,305 @@
 
     </main>
 
+<!-- Settings 设置弹窗 -->
+    <div
+      v-if="showSettingsModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      @click.self="showSettingsModal = false"
+    >
+      <div class="w-full max-w-lg flex flex-col min-h-[480px] border border-[var(--card-border)] rounded-lg overflow-hidden font-mono"
+                       style="background:var(--card-bg); max-width: 720px; max-height: 80vh; box-shadow: 0 25px 80px rgba(0,0,0,0.55);">
+
+        <!-- Header -->
+        <div class="flex justify-between items-center px-5 py-4 border-b border-[var(--card-border)] shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-7 h-7 flex items-center justify-center rounded" style="background: var(--glow-color);">
+              <svg class="w-4 h-4" style="color: var(--midground);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+              </svg>
+            </div>
+            <span class="text-[var(--midground)] font-mono text-sm font-bold tracking-wide">设置</span>
+          </div>
+          <button @click="showSettingsModal = false"
+                  class="cursor-pointer font-mono text-base px-2 py-1 rounded hover:bg-[var(--card-border)] transition-colors"
+                  style="color: color-mix(in srgb, var(--midground) 50%, transparent);">✕</button>
+        </div>
+
+        <!-- Body: sidebar + content -->
+        <div class="flex flex-1 min-h-0">
+          <!-- Sidebar nav -->
+          <nav class="w-48 shrink-0 border-r border-[var(--card-border)] py-3 flex flex-col gap-0.5 overflow-y-auto"
+               style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+            <button
+              v-for="sec in settingsSections"
+              :key="sec.id"
+              @click="activeSettingsSection = sec.id"
+              class="flex items-center gap-2.5 px-4 py-2.5 mx-2 rounded text-left transition-all cursor-pointer"
+              :class="activeSettingsSection === sec.id ? '' : 'hover:bg-[var(--card-border)]'"
+              :style="activeSettingsSection === sec.id
+                ? 'background: var(--glow-color); color: var(--midground);'
+                : 'color: color-mix(in srgb, var(--midground) 65%, transparent);'"
+            >
+              <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sec.icon"></path>
+              </svg>
+              <span class="flex-1 flex flex-col leading-tight">
+                <span class="text-[12px] font-semibold">{{ sec.label }}</span>
+                <span class="text-[8px] tracking-widest uppercase opacity-60">{{ sec.sub }}</span>
+              </span>
+              <span v-if="activeSettingsSection === sec.id"
+                    class="w-1 h-4 rounded-full"
+                    style="background: var(--midground);"></span>
+            </button>
+          </nav>
+
+          <!-- Content -->
+          <div class="flex-1 overflow-y-auto px-6 py-5 text-xs">
+
+            <!-- 01 THEME -->
+            <div v-if="activeSettingsSection === 'theme'">
+              <div class="flex items-baseline justify-between mb-4">
+                <div>
+                  <div class="text-[10px] font-bold tracking-widest uppercase"
+                       style="color: color-mix(in srgb, var(--midground) 55%, transparent);">主题 THEME</div>
+                  <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">配色方案</div>
+                </div>
+                <div class="text-[10px]"
+                     style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
+                  当前: {{ themeLabels[currentTheme] || currentTheme }}
+                </div>
+              </div>
+              <div class="grid grid-cols-4 gap-3">
+                <button
+                  v-for="t in themeList"
+                  :key="t.id"
+                  @click="setTheme(t.id)"
+                  class="relative rounded-lg border-2 transition-all cursor-pointer flex flex-col overflow-hidden text-left"
+                  :class="currentTheme === t.id
+                    ? 'border-[var(--midground)] shadow-lg'
+                    : 'border-[var(--card-border)] hover:border-[var(--midground)] hover:-translate-y-0.5'"
+                  :style="{ background: t.bg }"
+                  :title="t.label"
+                >
+                  <div class="h-16 flex items-end justify-end p-2">
+                    <div v-if="currentTheme === t.id"
+                         class="w-3 h-3 rounded-full"
+                         :style="{ background: t.swatch, boxShadow: '0 0 8px ' + t.swatch }"></div>
+                  </div>
+                  <div class="px-2.5 py-1.5 flex items-center justify-between"
+                       :style="{ background: t.swatch }">
+                    <div>
+                      <div class="text-[11px] font-bold leading-tight" :style="{ color: t.bg }">{{ t.label }}</div>
+                      <div class="text-[9px] leading-tight opacity-80" :style="{ color: t.bg }">{{ t.desc }}</div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+              <div class="mt-5 p-3 rounded text-[10px] leading-relaxed"
+                   style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));
+                          color: color-mix(in srgb, var(--midground) 55%, transparent);">
+                主题决定控制台的配色与 CRT 风格基线。切换后立即生效，偏好会持久化到本地。
+              </div>
+            </div>
+
+            <!-- 02 APPEARANCE -->
+            <div v-if="activeSettingsSection === 'appearance'">
+              <div class="mb-4">
+                <div class="text-[10px] font-bold tracking-widest uppercase"
+                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">外观 APPEARANCE</div>
+                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">视觉细节</div>
+              </div>
+              <div class="flex items-center justify-between p-4 rounded border border-[var(--card-border)]"
+                   style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+                <div class="flex-1 pr-4">
+                  <div class="text-[12px] font-semibold" style="color: var(--midground);">CRT 扫描线效果</div>
+                  <div class="text-[10px] mt-1 leading-relaxed"
+                       style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
+                    复古终端扫描线纹理叠加，开启后整个面板会有 CRT 显示器的视觉质感。
+                  </div>
+                </div>
+                <button @click="toggleCrtEffects()"
+                        class="relative w-12 h-7 rounded-full transition-all shrink-0"
+                        :style="crtEnabled ? 'background: var(--glow-color);' : 'background: var(--card-border);'">
+                  <span class="absolute top-1 rounded-full transition-all"
+                        :style="crtEnabled
+                          ? 'left: calc(100% - 24px); width: 20px; height: 20px; background: var(--midground);'
+                          : 'left: 4px; width: 20px; height: 20px; background: color-mix(in srgb, var(--midground) 40%, transparent);'"></span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 03 REFRESH -->
+            <div v-if="activeSettingsSection === 'refresh'">
+              <div class="mb-4">
+                <div class="text-[10px] font-bold tracking-widest uppercase"
+                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">刷新 REFRESH</div>
+                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">轮询策略</div>
+              </div>
+              <div class="space-y-4">
+                <div class="flex items-center justify-between p-4 rounded border border-[var(--card-border)]"
+                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+                  <div class="flex-1 pr-4">
+                    <div class="text-[12px] font-semibold" style="color: var(--midground);">自动刷新</div>
+                    <div class="text-[10px] mt-1 leading-relaxed"
+                         style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
+                      定时轮询端口状态。关闭后只能手动点击刷新按钮。
+                    </div>
+                  </div>
+                  <button @click="toggleAutoRefresh()"
+                          class="relative w-12 h-7 rounded-full transition-all shrink-0"
+                          :style="autoRefresh ? 'background: var(--glow-color);' : 'background: var(--card-border);'">
+                    <span class="absolute top-1 rounded-full transition-all"
+                          :style="autoRefresh
+                            ? 'left: calc(100% - 24px); width: 20px; height: 20px; background: var(--midground);'
+                            : 'left: 4px; width: 20px; height: 20px; background: color-mix(in srgb, var(--midground) 40%, transparent);'"></span>
+                  </button>
+                </div>
+                <div class="p-4 rounded border border-[var(--card-border)]"
+                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+                  <div class="flex items-center justify-between mb-3">
+                    <div class="text-[12px] font-semibold" style="color: var(--midground);">刷新间隔</div>
+                    <div class="text-[11px] font-mono"
+                         style="color: color-mix(in srgb, var(--midground) 60%, transparent);">
+                      {{ refreshInterval }} 秒
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-6 gap-2">
+                    <button
+                      v-for="sec in allowedRefreshIntervals"
+                      :key="sec"
+                      @click="setRefreshInterval(sec)"
+                      class="py-2.5 rounded text-[12px] font-bold transition-all border text-center"
+                      :style="refreshInterval === sec
+                        ? 'background: var(--glow-color); color: var(--midground); border-color: var(--midground);'
+                        : 'background: transparent; color: color-mix(in srgb, var(--midground) 60%, transparent); border-color: var(--card-border);'"
+                    >
+                      {{ sec }}s
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 04 DEFAULTS -->
+            <div v-if="activeSettingsSection === 'defaults'">
+              <div class="mb-4">
+                <div class="text-[10px] font-bold tracking-widest uppercase"
+                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">默认值 DEFAULTS</div>
+                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">启动时的视图</div>
+              </div>
+              <div class="space-y-4">
+                <div class="p-4 rounded border border-[var(--card-border)]"
+                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+                  <div class="text-[12px] font-semibold mb-3" style="color: var(--midground);">默认分类</div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <button
+                      v-for="cat in [{ id: 'all', label: '全部', desc: '所有端口' }, { id: 'user', label: '应用', desc: '你启动的' }, { id: 'creative', label: '创意', desc: '系统相关' }]"
+                      :key="cat.id"
+                      @click="setDefaultCategory(cat.id)"
+                      class="py-3 px-3 rounded text-left transition-all border"
+                      :style="defaultCategory === cat.id
+                        ? 'background: var(--glow-color); color: var(--midground); border-color: var(--midground);'
+                        : 'background: transparent; color: color-mix(in srgb, var(--midground) 60%, transparent); border-color: var(--card-border);'"
+                    >
+                      <div class="text-[12px] font-bold">{{ cat.label }}</div>
+                      <div class="text-[9px] mt-0.5 opacity-70">{{ cat.desc }}</div>
+                    </button>
+                  </div>
+                </div>
+                <div class="p-4 rounded border border-[var(--card-border)]"
+                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+                  <div class="text-[12px] font-semibold mb-3" style="color: var(--midground);">默认标签页</div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <button
+                      v-for="tab in defaultTabOptions"
+                      :key="tab.id"
+                      @click="setDefaultTab(tab.id)"
+                      class="py-3 px-3 rounded text-left transition-all border"
+                      :style="defaultTab === tab.id
+                        ? 'background: var(--glow-color); color: var(--midground); border-color: var(--midground);'
+                        : 'background: transparent; color: color-mix(in srgb, var(--midground) 60%, transparent); border-color: var(--card-border);'"
+                    >
+                      <div class="text-[12px] font-bold">{{ tab.label }}</div>
+                      <div class="text-[9px] mt-0.5 opacity-70">{{ tab.desc }}</div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 05 ADVANCED -->
+            <div v-if="activeSettingsSection === 'advanced'">
+              <div class="mb-4">
+                <div class="text-[10px] font-bold tracking-widest uppercase"
+                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">高级 ADVANCED</div>
+                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">服务配置</div>
+              </div>
+              <div class="space-y-4">
+                <div class="p-4 rounded border border-[var(--card-border)]"
+                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+                  <div class="text-[12px] font-semibold mb-3" style="color: var(--midground);">控制台端口</div>
+                  <div class="flex items-center gap-3 flex-wrap">
+                    <input
+                      v-model.number="dashboardPort"
+                      type="number"
+                      min="1"
+                      max="65535"
+                      class="w-28 bg-transparent border border-[var(--card-border)] rounded px-3 py-2 text-[var(--midground)] text-xs font-mono focus:outline-none focus:border-[var(--midground)] transition-all"
+                    >
+                    <button @click="saveDashboardPort()"
+                            class="px-4 py-2 rounded text-[11px] font-bold transition-all"
+                            style="background: var(--glow-color); color: var(--midground);">
+                      保存
+                    </button>
+                    <span v-if="dashboardPort !== runningPort"
+                          class="text-[10px] font-mono"
+                          style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
+                      当前运行: {{ runningPort }}
+                    </span>
+                  </div>
+                  <div class="text-[10px] mt-3 leading-relaxed font-mono"
+                       style="color: color-mix(in srgb, var(--midground) 45%, transparent);">
+                    ⚠ 修改后需重启服务才能生效。新端口仅持久化到 mydashboard-config.json。
+                  </div>
+                </div>
+                <div class="p-4 rounded border border-[var(--card-border)]"
+                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
+                  <div class="text-[12px] font-semibold mb-2" style="color: var(--midground);">恢复默认设置</div>
+                  <div class="text-[10px] mb-3 leading-relaxed"
+                       style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
+                    将所有偏好（主题、CRT、自动刷新、间隔、默认分类/标签页、端口）恢复为初始默认值。
+                  </div>
+                  <button @click="resetPreferences()"
+                          class="px-4 py-2 rounded text-[11px] font-bold transition-all hover:bg-red-500/20 border"
+                          style="color: color-mix(in srgb, var(--midground) 70%, transparent); border-color: var(--card-border);">
+                    恢复默认设置
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="border-t border-[var(--card-border)] px-5 py-3 flex justify-between items-center shrink-0">
+          <div class="text-[10px]"
+               style="color: color-mix(in srgb, var(--midground) 40%, transparent);">
+            设置自动保存
+          </div>
+          <button @click="showSettingsModal = false"
+                  class="px-5 py-2 rounded text-[11px] font-bold transition-all"
+                  style="background: var(--glow-color); color: var(--midground);">
+            完成
+          </button>
+        </div>
+
+      </div>
+    </div>
     <!-- 弹窗：新增/修改托管项目配置 -->
     <div 
       v-if="showProjectModal" 
@@ -1044,6 +1407,170 @@
         });
 
         let snapshotIntervalId = null;
+
+/* ===== Settings state & helpers ===== */
+const showSettingsModal = ref(false);
+const activeSettingsSection = ref('theme');
+const currentTheme = ref(localStorage.getItem('theme') || 'dark-emerald');
+const crtEnabled = ref(localStorage.getItem('crtEnabled') !== 'false');
+const refreshInterval = ref(5);
+const defaultCategory = ref('user');
+const defaultTab = ref('managed');
+const dashboardPort = ref(9229);
+const runningPort = ref(9229);
+const preferencesDefaults = ref(null);
+const allowedRefreshIntervals = ref([3, 5, 10, 15, 30, 60]);
+
+/* theme list mirrors THEME_VARIABLES keys + visual swatch data */
+const themeList = [
+  { id: 'dark-emerald', label: 'Emerald', desc: '深绿琥珀', swatch: '#ffbd38', bg: '#041c1c' },
+  { id: 'blueprint',    label: 'Blueprint', desc: '蓝图蓝', swatch: '#38bdf8', bg: '#0a1628' },
+  { id: 'midnight',     label: 'Midnight', desc: '深夜靛', swatch: '#818cf8', bg: '#0c0f1a' },
+  { id: 'arctic',       label: 'Arctic', desc: '极地白', swatch: '#0d9488', bg: '#f1f5f9' },
+  { id: 'terra',        label: 'Terra', desc: '陶土橙', swatch: '#c96442', bg: '#1a1410' },
+  { id: 'neon',         label: 'Neon', desc: '霓虹绿', swatch: '#00ff41', bg: '#000000' },
+  { id: 'velvet',       label: 'Velvet', desc: '丝绒粉', swatch: '#e8a0bf', bg: '#161219' }
+];
+const themeLabels = Object.fromEntries(themeList.map(t => [t.id, t.label]));
+
+/* default-tab options shown in settings */
+const defaultTabOptions = [
+  { id: 'managed', label: '托管', desc: '你管理的项目' },
+  { id: 'local',   label: '本地', desc: '本机监听' },
+  { id: 'system',  label: '全局', desc: '全部端口' }
+];
+
+/* sidebar nav */
+const settingsSections = ref([
+  { id: 'theme',      label: '主题',      sub: 'THEME',      icon: 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4z' },
+  { id: 'appearance', label: '外观',      sub: 'APPEARANCE', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
+  { id: 'refresh',    label: '刷新',      sub: 'REFRESH',    icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+  { id: 'defaults',   label: '默认视图',  sub: 'DEFAULTS',   icon: 'M4 6h16M4 12h16M4 18h7' },
+  { id: 'advanced',   label: '高级',      sub: 'ADVANCED',   icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50 M15 12a3 3 0 11-6 0 3 3 0 016 0z' }
+]);
+
+/* API helpers */
+const savePreference = async (patch) => {
+  try {
+    const res = await fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.requires_restart && data.message) {
+      alert(data.message);
+    }
+    return data;
+  } catch (e) {
+    console.error('Failed to save preference:', e);
+    return null;
+  }
+};
+
+const fetchPreferences = async () => {
+  try {
+    const res = await fetch('/api/preferences');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const prefs = data.preferences || {};
+    preferencesDefaults.value = data.defaults || null;
+    if (Array.isArray(data.allowed?.refresh_intervals)) {
+      allowedRefreshIntervals.value = data.allowed.refresh_intervals;
+    }
+    if (prefs.theme)         currentTheme.value  = prefs.theme;
+    if (typeof prefs.auto_refresh === 'boolean') autoRefresh.value = prefs.auto_refresh;
+    if (typeof prefs.refresh_interval === 'number') refreshInterval.value = prefs.refresh_interval;
+    if (typeof prefs.default_category === 'string') defaultCategory.value = prefs.default_category;
+    if (typeof prefs.port === 'number') {
+      dashboardPort.value = prefs.port;
+      runningPort.value   = data.running_port ?? prefs.port;
+    }
+    /* apply theme + crt side effects */
+    applyTheme(currentTheme.value);
+    document.body.classList.toggle('crt-disabled', !crtEnabled.value);
+  } catch (e) {
+    console.error('Failed to fetch preferences:', e);
+  }
+};
+
+/* Theme */
+const setTheme = (theme) => {
+  currentTheme.value = theme;
+  localStorage.setItem('theme', theme);
+  applyTheme(theme);
+  savePreference({ theme });
+};
+
+/* CRT effects */
+const toggleCrtEffects = () => {
+  crtEnabled.value = !crtEnabled.value;
+  localStorage.setItem('crtEnabled', String(crtEnabled.value));
+  document.body.classList.toggle('crt-disabled', !crtEnabled.value);
+};
+
+/* Refresh
+ * NOTE: auto-refresh loop interval is currently fixed at 3000ms in startAutoRefresh().
+ * We persist the preferred interval so future versions can honor it, but the live
+ * loop stays unchanged to avoid touching behavior the user hasn't asked for. */
+const setRefreshInterval = (sec) => {
+  refreshInterval.value = sec;
+  savePreference({ refresh_interval: sec });
+};
+
+/* Defaults */
+const setDefaultCategory = (cat) => {
+  defaultCategory.value = cat;
+  savePreference({ default_category: cat });
+};
+const setDefaultTab = (tab) => {
+  defaultTab.value = tab;
+  savePreference({ default_tab: tab });
+};
+
+/* Port */
+const saveDashboardPort = () => {
+  const p = Number(dashboardPort.value);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) {
+    alert('端口必须在 1-65535 之间');
+    return;
+  }
+  savePreference({ port: p });
+};
+
+/* Reset all */
+const resetPreferences = async () => {
+  if (!confirm('确认要恢复所有设置为默认值吗？')) return;
+  try {
+    /* GET defaults, then PUT each one back */
+    const dRes = await fetch('/api/preferences');
+    const data = await dRes.json();
+    const d = data.defaults;
+    if (!d) {
+      alert('无法读取默认值，请稍后重试');
+      return;
+    }
+    await savePreference({
+      theme: d.theme,
+      auto_refresh: d.auto_refresh,
+      refresh_interval: d.refresh_interval,
+      default_category: d.default_category,
+      port: d.port
+    });
+    /* refresh local state + clear overrides */
+    await fetchPreferences();
+    defaultTab.value = 'managed';
+    localStorage.removeItem('theme');
+    localStorage.removeItem('crtEnabled');
+  } catch (e) {
+    console.error('Failed to reset preferences:', e);
+    alert('恢复默认设置失败');
+  }
+};
+
+/* NOTE: fetchPreferences() is invoked from the onMounted hook in index.html. */
+
         const autoRefresh = ref(localStorage.getItem('autoRefresh') !== 'false');
 
         const startAutoRefresh = () => {
@@ -1487,6 +2014,7 @@
         };
 
         onMounted(() => {
+          fetchPreferences();
           refreshDashboard(true);
           if (autoRefresh.value) {
             startAutoRefresh();
@@ -1646,7 +2174,26 @@
           projectStatusMeta,
           buildPortUrl,
           openPortPage,
-          showExternalStateHelp
+          showExternalStateHelp,
+          showSettingsModal,
+          activeSettingsSection,
+          settingsSections,
+          currentTheme,
+          crtEnabled,
+          themeList,
+          themeLabels,
+          defaultTabOptions,
+          dashboardPort,
+          runningPort,
+          setTheme,
+          toggleCrtEffects,
+          setRefreshInterval,
+          setDefaultCategory,
+          setDefaultTab,
+          saveDashboardPort,
+          savePreference,
+          fetchPreferences,
+          resetPreferences
         };
       }
     }).mount('#app');
