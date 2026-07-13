@@ -4,6 +4,297 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PORT DASHBOARD - 本地网页与应用端口控制中心</title>
+<style>
+/* ===== Settings 弹窗专属样式(主题感知) ===== */
+.settings-backdrop {
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), rgba(0,0,0,0.85));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: settings-fade-in .15s ease-out;
+}
+@keyframes settings-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.settings-modal {
+  animation: settings-pop-in .2s cubic-bezier(.2,.9,.3,1.2);
+}
+@keyframes settings-pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+.settings-header-icon {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--glow-color) 90%, transparent), color-mix(in srgb, var(--glow-color) 40%, transparent));
+  color: var(--midground);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glow-color) 60%, transparent);
+}
+.settings-eyebrow {
+  color: color-mix(in srgb, var(--midground) 55%, transparent);
+}
+.settings-current-chip {
+  background: color-mix(in srgb, var(--card-border) 60%, transparent);
+  color: var(--midground);
+}
+.settings-close-btn {
+  background: transparent;
+  color: color-mix(in srgb, var(--midground) 65%, transparent);
+  border: 1px solid transparent;
+}
+.settings-close-btn:hover {
+  background: color-mix(in srgb, var(--card-border) 80%, transparent);
+  color: var(--midground);
+  border-color: color-mix(in srgb, var(--card-border) 100%, transparent);
+}
+
+.settings-sidebar {
+  width: 168px;
+  background: color-mix(in srgb, var(--card-bg) 75%, var(--glow-color));
+  border-right: 1px solid var(--card-border);
+}
+.settings-nav-item {
+  color: color-mix(in srgb, var(--midground) 60%, transparent);
+  position: relative;
+}
+.settings-nav-item:hover {
+  background: color-mix(in srgb, var(--card-border) 50%, transparent);
+  color: var(--midground);
+}
+.settings-nav-item.is-active {
+  background: color-mix(in srgb, var(--glow-color) 35%, transparent);
+  color: var(--midground);
+}
+.settings-nav-bar {
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  transition: background .15s;
+}
+.settings-nav-item.is-active .settings-nav-bar {
+  background: var(--glow-color);
+  box-shadow: 0 0 6px var(--glow-color);
+}
+.settings-nav-item.is-active svg { color: var(--midground); }
+
+.settings-content {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--card-bg) 100%, transparent),
+    color-mix(in srgb, var(--card-bg) 95%, var(--glow-color)));
+}
+.settings-section-head { margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px dashed var(--card-border); }
+.settings-h1 {
+  font-size: 20px; font-weight: 700; margin-top: 4px;
+  color: var(--midground); letter-spacing: -0.01em;
+}
+.settings-hint {
+  font-size: 11px; margin-top: 6px; line-height: 1.5;
+  color: color-mix(in srgb, var(--midground) 55%, transparent);
+}
+
+/* 紧凑横向主题行:左侧 swatch 圆点 + 中间双行文字 + 右侧对勾 */
+.settings-theme-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--card-border) 50%, transparent);
+  background: color-mix(in srgb, var(--card-border) 25%, transparent);
+  transition: all .15s;
+}
+.settings-theme-row:hover {
+  border-color: color-mix(in srgb, var(--glow-color) 70%, transparent);
+  background: color-mix(in srgb, var(--glow-color) 15%, transparent);
+  transform: translateX(2px);
+}
+.settings-theme-row.is-active {
+  border-color: var(--glow-color);
+  background: color-mix(in srgb, var(--glow-color) 25%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glow-color) 60%, transparent);
+}
+.settings-theme-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.settings-theme-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.settings-theme-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--midground);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.settings-theme-desc {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--midground) 55%, transparent);
+  line-height: 1.2;
+}
+.settings-theme-row .settings-theme-check {
+  width: 14px;
+  height: 14px;
+  color: var(--midground);
+  flex-shrink: 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--card-border) 60%, transparent);
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-row.is-disabled { opacity: 0.4; pointer-events: none; }
+.settings-row-main { flex: 1; min-width: 0; }
+.settings-row-title {
+  font-size: 13px; font-weight: 600;
+  color: var(--midground);
+}
+.settings-row-desc {
+  font-size: 10.5px; margin-top: 3px; line-height: 1.5;
+  color: color-mix(in srgb, var(--midground) 55%, transparent);
+}
+
+.settings-toggle {
+  position: relative;
+  display: inline-block;
+  width: 38px; height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.settings-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.settings-toggle-track {
+  position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--card-border) 100%, transparent);
+  border-radius: 11px;
+  transition: background .2s;
+}
+.settings-toggle-thumb {
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 16px; height: 16px;
+  background: var(--midground);
+  border-radius: 50%;
+  transition: transform .2s, background .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+.settings-toggle input:checked + .settings-toggle-track {
+  background: var(--glow-color);
+}
+.settings-toggle input:checked + .settings-toggle-track .settings-toggle-thumb {
+  transform: translateX(16px);
+  background: #041c1c;
+}
+
+.settings-segmented {
+  display: inline-flex;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--card-border) 30%, transparent);
+}
+.settings-segmented button {
+  padding: 6px 12px;
+  font-size: 11px; font-family: var(--font-mono);
+  color: color-mix(in srgb, var(--midground) 65%, transparent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all .15s;
+  border-right: 1px solid var(--card-border);
+}
+.settings-segmented button:last-child { border-right: none; }
+.settings-segmented button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--card-border) 50%, transparent);
+  color: var(--midground);
+}
+.settings-segmented button.is-active {
+  background: var(--glow-color);
+  color: #041c1c;
+  font-weight: 700;
+}
+.settings-segmented button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.settings-input {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  background: color-mix(in srgb, var(--card-border) 30%, transparent);
+  color: var(--midground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.settings-input:focus {
+  outline: none;
+  border-color: var(--glow-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--glow-color) 30%, transparent);
+}
+
+.settings-info-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--card-border) 40%, transparent);
+  border-left: 2px solid var(--glow-color);
+  color: color-mix(in srgb, var(--midground) 70%, transparent);
+  font-size: 11px;
+}
+
+.settings-footer {
+  background: color-mix(in srgb, var(--card-bg) 75%, var(--glow-color));
+}
+.settings-btn-primary {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: var(--glow-color);
+  color: #041c1c;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  border: none;
+  cursor: pointer;
+  transition: all .15s;
+}
+.settings-btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.settings-btn-ghost {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--midground) 70%, transparent);
+  font-size: 11px;
+  border: 1px solid var(--card-border);
+  cursor: pointer;
+  transition: all .15s;
+}
+.settings-btn-ghost:hover {
+  background: color-mix(in srgb, var(--card-border) 60%, transparent);
+  color: var(--midground);
+}
+.settings-btn-danger {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: transparent;
+  color: #f87171;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #f87171;
+  cursor: pointer;
+  transition: all .15s;
+}
+.settings-btn-danger:hover { background: #f87171; color: #041c1c; }
+</style>
   <!-- Tailwind CSS (local) -->
   <link href="/static/tailwind.min.css" rel="stylesheet">
   <!-- Vue 3 -->
@@ -201,34 +492,38 @@ function applyTheme(themeId) {
   <div id="app" class="flex flex-col h-full max-h-screen relative z-10 p-4 md:p-6 select-none" v-cloak>
     
     <!-- 顶部标题栏 -->
-    <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-hermes-cream/20 pb-4 mb-6">
-      <div class="flex items-center space-x-4 mb-4 md:mb-0">
-        <!-- SVG Logo (Retro geometric style like Hermes) -->
-        <div class="w-12 h-12 flex items-center justify-center border-2 border-hermes-cream relative glow-active">
-          <span class="font-bold text-xl text-hermes-cream font-mono">P</span>
-          <div class="absolute -top-1 -left-1 w-2 h-2 bg-hermes-accent"></div>
-          <div class="absolute -bottom-1 -right-1 w-2 h-2 bg-hermes-accent"></div>
+    <header class="relative flex flex-col md:flex-row md:items-center border-b border-hermes-cream/20 pb-4 mb-6 gap-4">
+        <div class="flex items-center space-x-4 shrink-0">
+          <!-- SVG Logo (Retro geometric style like Hermes) -->
+          <div class="w-12 h-12 flex items-center justify-center border-2 border-hermes-cream relative glow-active shrink-0">
+            <span class="font-bold text-xl text-hermes-cream font-mono">P</span>
+            <div class="absolute -top-1 -left-1 w-2 h-2 bg-hermes-accent"></div>
+            <div class="absolute -bottom-1 -right-1 w-2 h-2 bg-hermes-accent"></div>
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold font-mono tracking-wider text-hermes-cream">
+              PORT DASHBOARD
+            </h1>
+            <p class="text-xs text-hermes-dimmed tracking-wide mt-1">本地服务端口及生命周期可视化控制台</p>
+          </div>
         </div>
-        <div>
-          <h1 class="text-2xl font-bold font-mono tracking-wider text-hermes-cream">
-            PORT DASHBOARD
-          </h1>
-          <p class="text-xs text-hermes-dimmed tracking-wide mt-1">本地服务端口及生命周期可视化控制台</p>
-        </div>
-      </div>
-      
-      <!-- Settings 入口按钮 -->
-      <button
-        @click="showSettingsModal = true; activeSettingsSection = 'theme';"
-        class="text-[var(--midground)] border border-[var(--card-border)] hover:bg-[var(--card-border)] px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all cursor-pointer shrink-0"
-        title="Settings / 设置"
-      >
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-        </svg>
-        SETTING
-      </button>
+
+        <!-- 中间弹性空间 + Settings 按钮 -->
+        <div class="hidden md:block flex-1"></div>
+
+        <!-- Settings 入口按钮 -->
+        <button
+          @click="showSettingsModal = true; activeSettingsSection = 'theme';"
+          class="settings-trigger group flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)]/70 backdrop-blur-sm hover:border-hermes-accent hover:bg-hermes-accent/10 transition-all duration-200 cursor-pointer shrink-0"
+          title="Settings / 设置"
+        >
+          <svg class="w-4 h-4 text-hermes-accent group-hover:rotate-45 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
+          <span class="text-[11px] font-mono font-semibold tracking-wider text-[var(--midground)]">SETTING</span>
+          <span class="kbd-hint hidden lg:inline text-[9px] font-mono px-1.5 py-0.5 rounded border border-[var(--card-border)] text-hermes-dimmed opacity-0 group-hover:opacity-100 transition-opacity">⌘ ,</span>
+        </button>
 
       <!-- 系统状态仪表盘 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs w-full md:w-auto font-mono">
@@ -941,305 +1236,237 @@ function applyTheme(themeId) {
     </main>
 
 <!-- Settings 设置弹窗 -->
-    <div
-      v-if="showSettingsModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-      @click.self="showSettingsModal = false"
-    >
-      <div class="w-full max-w-lg flex flex-col min-h-[480px] border border-[var(--card-border)] rounded-lg overflow-hidden font-mono"
-                       style="background:var(--card-bg); max-width: 720px; max-height: 80vh; box-shadow: 0 25px 80px rgba(0,0,0,0.55);">
+<div
+  v-if="showSettingsModal"
+  class="fixed inset-0 z-50 flex items-center justify-center p-4 settings-backdrop"
+  @click.self="showSettingsModal = false"
+  @keydown.esc="showSettingsModal = false"
+  tabindex="-1"
+>
+  <div class="settings-modal relative w-full flex flex-col border border-[var(--card-border)] rounded-2xl font-mono overflow-hidden"
+       style="background: var(--card-bg); max-width: 780px; height: min(82vh, 720px); box-shadow: 0 32px 96px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,189,56,0.06);">
 
-        <!-- Header -->
-        <div class="flex justify-between items-center px-5 py-4 border-b border-[var(--card-border)] shrink-0">
-          <div class="flex items-center gap-3">
-            <div class="w-7 h-7 flex items-center justify-center rounded" style="background: var(--glow-color);">
-              <svg class="w-4 h-4" style="color: var(--midground);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-              </svg>
-            </div>
-            <span class="text-[var(--midground)] font-mono text-sm font-bold tracking-wide">设置</span>
-          </div>
-          <button @click="showSettingsModal = false"
-                  class="cursor-pointer font-mono text-base px-2 py-1 rounded hover:bg-[var(--card-border)] transition-colors"
-                  style="color: color-mix(in srgb, var(--midground) 50%, transparent);">✕</button>
+    <!-- Header: icon + title 双行 + 当前主题标签 + close -->
+    <div class="flex justify-between items-start px-6 pt-5 pb-4 border-b border-[var(--card-border)] shrink-0">
+      <div class="flex items-start gap-3">
+        <div class="w-10 h-10 flex items-center justify-center rounded-xl shrink-0 settings-header-icon">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
         </div>
+        <div class="leading-tight">
+          <div class="text-[10px] font-bold tracking-[0.18em] uppercase settings-eyebrow">SETTINGS / 设置</div>
+          <div class="text-[18px] font-bold mt-0.5" style="color: var(--midground);">控制中心偏好</div>
+          <div class="text-[10px] mt-1 settings-eyebrow">主题 · 外观 · 刷新 · 默认 · 高级</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        <div class="text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md settings-current-chip">
+                  <span class="w-1.5 h-1.5 rounded-full" :style="{ background: (themeList.find(t => t.id === currentTheme) || {}).swatch || '#888', boxShadow: '0 0 6px ' + ((themeList.find(t => t.id === currentTheme) || {}).swatch || '#888') }"></span>
+                  <span class="font-semibold">{{ themeLabels[currentTheme] || currentTheme }}</span>
+                </div>
+        <button @click="showSettingsModal = false"
+                class="settings-close-btn w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer"
+                aria-label="关闭">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6L6 18"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
 
-        <!-- Body: sidebar + content -->
-        <div class="flex flex-1 min-h-0">
-          <!-- Sidebar nav -->
-          <nav class="w-48 shrink-0 border-r border-[var(--card-border)] py-3 flex flex-col gap-0.5 overflow-y-auto"
-               style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-            <button
-              v-for="sec in settingsSections"
-              :key="sec.id"
-              @click="activeSettingsSection = sec.id"
-              class="flex items-center gap-2.5 px-4 py-2.5 mx-2 rounded text-left transition-all cursor-pointer"
-              :class="activeSettingsSection === sec.id ? '' : 'hover:bg-[var(--card-border)]'"
-              :style="activeSettingsSection === sec.id
-                ? 'background: var(--glow-color); color: var(--midground);'
-                : 'color: color-mix(in srgb, var(--midground) 65%, transparent);'"
-            >
-              <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sec.icon"></path>
+    <!-- Body: 细 sidebar + 内容 -->
+    <div class="flex flex-1 min-h-0">
+
+      <!-- 细 sidebar: icon + 短标签 -->
+      <nav class="settings-sidebar shrink-0 py-3 px-2 flex flex-col gap-1 overflow-y-auto">
+        <button
+          v-for="sec in settingsSections"
+          :key="sec.id"
+          @click="activeSettingsSection = sec.id"
+          class="settings-nav-item group relative flex items-center gap-3 pl-3 pr-3 py-2.5 rounded-lg text-left transition-all cursor-pointer"
+          :class="activeSettingsSection === sec.id ? 'is-active' : ''"
+        >
+          <span class="settings-nav-bar"></span>
+          <svg class="w-4 h-4 shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" :d="sec.icon"></path>
+          </svg>
+          <span class="flex-1 flex flex-col leading-tight min-w-0">
+            <span class="text-[12px] font-semibold truncate">{{ sec.label }}</span>
+            <span class="text-[8.5px] tracking-[0.15em] uppercase opacity-50 truncate">{{ sec.sub }}</span>
+          </span>
+        </button>
+      </nav>
+
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto px-7 py-6 text-xs settings-content">
+
+        <!-- 01 THEME -->
+        <div v-if="activeSettingsSection === 'theme'">
+          <div class="settings-section-head">
+            <div class="settings-eyebrow">SECTION 01 / 配色方案</div>
+            <div class="settings-h1">主题</div>
+            <div class="settings-hint">主题决定控制台整体视觉基线,切换立即生效并持久化到本地。</div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button v-for="t in themeList" :key="t.id" @click="setTheme(t.id)"
+                    class="settings-theme-row group"
+                    :class="currentTheme === t.id ? 'is-active' : ''"
+                    :title="t.label + ' / ' + t.desc">
+              <span class="settings-theme-swatch" :style="{ background: t.swatch, boxShadow: '0 0 8px ' + t.swatch }"></span>
+              <div class="settings-theme-info">
+                <div class="settings-theme-label">{{ t.label }}</div>
+                <div class="settings-theme-desc">{{ t.desc }}</div>
+              </div>
+              <svg v-if="currentTheme === t.id" class="settings-theme-check" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
               </svg>
-              <span class="flex-1 flex flex-col leading-tight">
-                <span class="text-[12px] font-semibold">{{ sec.label }}</span>
-                <span class="text-[8px] tracking-widest uppercase opacity-60">{{ sec.sub }}</span>
-              </span>
-              <span v-if="activeSettingsSection === sec.id"
-                    class="w-1 h-4 rounded-full"
-                    style="background: var(--midground);"></span>
             </button>
-          </nav>
-
-          <!-- Content -->
-          <div class="flex-1 overflow-y-auto px-6 py-5 text-xs">
-
-            <!-- 01 THEME -->
-            <div v-if="activeSettingsSection === 'theme'">
-              <div class="flex items-baseline justify-between mb-4">
-                <div>
-                  <div class="text-[10px] font-bold tracking-widest uppercase"
-                       style="color: color-mix(in srgb, var(--midground) 55%, transparent);">主题 THEME</div>
-                  <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">配色方案</div>
-                </div>
-                <div class="text-[10px]"
-                     style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
-                  当前: {{ themeLabels[currentTheme] || currentTheme }}
-                </div>
-              </div>
-              <div class="grid grid-cols-4 gap-3">
-                <button
-                  v-for="t in themeList"
-                  :key="t.id"
-                  @click="setTheme(t.id)"
-                  class="relative rounded-lg border-2 transition-all cursor-pointer flex flex-col overflow-hidden text-left"
-                  :class="currentTheme === t.id
-                    ? 'border-[var(--midground)] shadow-lg'
-                    : 'border-[var(--card-border)] hover:border-[var(--midground)] hover:-translate-y-0.5'"
-                  :style="{ background: t.bg }"
-                  :title="t.label"
-                >
-                  <div class="h-16 flex items-end justify-end p-2">
-                    <div v-if="currentTheme === t.id"
-                         class="w-3 h-3 rounded-full"
-                         :style="{ background: t.swatch, boxShadow: '0 0 8px ' + t.swatch }"></div>
-                  </div>
-                  <div class="px-2.5 py-1.5 flex items-center justify-between"
-                       :style="{ background: t.swatch }">
-                    <div>
-                      <div class="text-[11px] font-bold leading-tight" :style="{ color: t.bg }">{{ t.label }}</div>
-                      <div class="text-[9px] leading-tight opacity-80" :style="{ color: t.bg }">{{ t.desc }}</div>
-                    </div>
-                  </div>
-                </button>
-              </div>
-              <div class="mt-5 p-3 rounded text-[10px] leading-relaxed"
-                   style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));
-                          color: color-mix(in srgb, var(--midground) 55%, transparent);">
-                主题决定控制台的配色与 CRT 风格基线。切换后立即生效，偏好会持久化到本地。
+          </div>
+          <div class="settings-info-card mt-5">
+            <div class="flex items-start gap-2">
+              <svg class="w-3.5 h-3.5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <div class="leading-relaxed">
+                主题改变全局颜色变量,所有组件自动跟随。CRT 扫描线由外观面板独立控制。
               </div>
             </div>
-
-            <!-- 02 APPEARANCE -->
-            <div v-if="activeSettingsSection === 'appearance'">
-              <div class="mb-4">
-                <div class="text-[10px] font-bold tracking-widest uppercase"
-                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">外观 APPEARANCE</div>
-                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">视觉细节</div>
-              </div>
-              <div class="flex items-center justify-between p-4 rounded border border-[var(--card-border)]"
-                   style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-                <div class="flex-1 pr-4">
-                  <div class="text-[12px] font-semibold" style="color: var(--midground);">CRT 扫描线效果</div>
-                  <div class="text-[10px] mt-1 leading-relaxed"
-                       style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
-                    复古终端扫描线纹理叠加，开启后整个面板会有 CRT 显示器的视觉质感。
-                  </div>
-                </div>
-                <button @click="toggleCrtEffects()"
-                        class="relative w-12 h-7 rounded-full transition-all shrink-0"
-                        :style="crtEnabled ? 'background: var(--glow-color);' : 'background: var(--card-border);'">
-                  <span class="absolute top-1 rounded-full transition-all"
-                        :style="crtEnabled
-                          ? 'left: calc(100% - 24px); width: 20px; height: 20px; background: var(--midground);'
-                          : 'left: 4px; width: 20px; height: 20px; background: color-mix(in srgb, var(--midground) 40%, transparent);'"></span>
-                </button>
-              </div>
-            </div>
-
-            <!-- 03 REFRESH -->
-            <div v-if="activeSettingsSection === 'refresh'">
-              <div class="mb-4">
-                <div class="text-[10px] font-bold tracking-widest uppercase"
-                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">刷新 REFRESH</div>
-                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">轮询策略</div>
-              </div>
-              <div class="space-y-4">
-                <div class="flex items-center justify-between p-4 rounded border border-[var(--card-border)]"
-                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-                  <div class="flex-1 pr-4">
-                    <div class="text-[12px] font-semibold" style="color: var(--midground);">自动刷新</div>
-                    <div class="text-[10px] mt-1 leading-relaxed"
-                         style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
-                      定时轮询端口状态。关闭后只能手动点击刷新按钮。
-                    </div>
-                  </div>
-                  <button @click="toggleAutoRefresh()"
-                          class="relative w-12 h-7 rounded-full transition-all shrink-0"
-                          :style="autoRefresh ? 'background: var(--glow-color);' : 'background: var(--card-border);'">
-                    <span class="absolute top-1 rounded-full transition-all"
-                          :style="autoRefresh
-                            ? 'left: calc(100% - 24px); width: 20px; height: 20px; background: var(--midground);'
-                            : 'left: 4px; width: 20px; height: 20px; background: color-mix(in srgb, var(--midground) 40%, transparent);'"></span>
-                  </button>
-                </div>
-                <div class="p-4 rounded border border-[var(--card-border)]"
-                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-                  <div class="flex items-center justify-between mb-3">
-                    <div class="text-[12px] font-semibold" style="color: var(--midground);">刷新间隔</div>
-                    <div class="text-[11px] font-mono"
-                         style="color: color-mix(in srgb, var(--midground) 60%, transparent);">
-                      {{ refreshInterval }} 秒
-                    </div>
-                  </div>
-                  <div class="grid grid-cols-6 gap-2">
-                    <button
-                      v-for="sec in allowedRefreshIntervals"
-                      :key="sec"
-                      @click="setRefreshInterval(sec)"
-                      class="py-2.5 rounded text-[12px] font-bold transition-all border text-center"
-                      :style="refreshInterval === sec
-                        ? 'background: var(--glow-color); color: var(--midground); border-color: var(--midground);'
-                        : 'background: transparent; color: color-mix(in srgb, var(--midground) 60%, transparent); border-color: var(--card-border);'"
-                    >
-                      {{ sec }}s
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 04 DEFAULTS -->
-            <div v-if="activeSettingsSection === 'defaults'">
-              <div class="mb-4">
-                <div class="text-[10px] font-bold tracking-widest uppercase"
-                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">默认值 DEFAULTS</div>
-                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">启动时的视图</div>
-              </div>
-              <div class="space-y-4">
-                <div class="p-4 rounded border border-[var(--card-border)]"
-                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-                  <div class="text-[12px] font-semibold mb-3" style="color: var(--midground);">默认分类</div>
-                  <div class="grid grid-cols-3 gap-2">
-                    <button
-                      v-for="cat in [{ id: 'all', label: '全部', desc: '所有端口' }, { id: 'user', label: '应用', desc: '你启动的' }, { id: 'creative', label: '创意', desc: '系统相关' }]"
-                      :key="cat.id"
-                      @click="setDefaultCategory(cat.id)"
-                      class="py-3 px-3 rounded text-left transition-all border"
-                      :style="defaultCategory === cat.id
-                        ? 'background: var(--glow-color); color: var(--midground); border-color: var(--midground);'
-                        : 'background: transparent; color: color-mix(in srgb, var(--midground) 60%, transparent); border-color: var(--card-border);'"
-                    >
-                      <div class="text-[12px] font-bold">{{ cat.label }}</div>
-                      <div class="text-[9px] mt-0.5 opacity-70">{{ cat.desc }}</div>
-                    </button>
-                  </div>
-                </div>
-                <div class="p-4 rounded border border-[var(--card-border)]"
-                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-                  <div class="text-[12px] font-semibold mb-3" style="color: var(--midground);">默认标签页</div>
-                  <div class="grid grid-cols-3 gap-2">
-                    <button
-                      v-for="tab in defaultTabOptions"
-                      :key="tab.id"
-                      @click="setDefaultTab(tab.id)"
-                      class="py-3 px-3 rounded text-left transition-all border"
-                      :style="defaultTab === tab.id
-                        ? 'background: var(--glow-color); color: var(--midground); border-color: var(--midground);'
-                        : 'background: transparent; color: color-mix(in srgb, var(--midground) 60%, transparent); border-color: var(--card-border);'"
-                    >
-                      <div class="text-[12px] font-bold">{{ tab.label }}</div>
-                      <div class="text-[9px] mt-0.5 opacity-70">{{ tab.desc }}</div>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 05 ADVANCED -->
-            <div v-if="activeSettingsSection === 'advanced'">
-              <div class="mb-4">
-                <div class="text-[10px] font-bold tracking-widest uppercase"
-                     style="color: color-mix(in srgb, var(--midground) 55%, transparent);">高级 ADVANCED</div>
-                <div class="text-[14px] font-bold mt-1" style="color: var(--midground);">服务配置</div>
-              </div>
-              <div class="space-y-4">
-                <div class="p-4 rounded border border-[var(--card-border)]"
-                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-                  <div class="text-[12px] font-semibold mb-3" style="color: var(--midground);">控制台端口</div>
-                  <div class="flex items-center gap-3 flex-wrap">
-                    <input
-                      v-model.number="dashboardPort"
-                      type="number"
-                      min="1"
-                      max="65535"
-                      class="w-28 bg-transparent border border-[var(--card-border)] rounded px-3 py-2 text-[var(--midground)] text-xs font-mono focus:outline-none focus:border-[var(--midground)] transition-all"
-                    >
-                    <button @click="saveDashboardPort()"
-                            class="px-4 py-2 rounded text-[11px] font-bold transition-all"
-                            style="background: var(--glow-color); color: var(--midground);">
-                      保存
-                    </button>
-                    <span v-if="dashboardPort !== runningPort"
-                          class="text-[10px] font-mono"
-                          style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
-                      当前运行: {{ runningPort }}
-                    </span>
-                  </div>
-                  <div class="text-[10px] mt-3 leading-relaxed font-mono"
-                       style="color: color-mix(in srgb, var(--midground) 45%, transparent);">
-                    ⚠ 修改后需重启服务才能生效。新端口仅持久化到 mydashboard-config.json。
-                  </div>
-                </div>
-                <div class="p-4 rounded border border-[var(--card-border)]"
-                     style="background: color-mix(in srgb, var(--card-bg) 85%, var(--glow-color));">
-                  <div class="text-[12px] font-semibold mb-2" style="color: var(--midground);">恢复默认设置</div>
-                  <div class="text-[10px] mb-3 leading-relaxed"
-                       style="color: color-mix(in srgb, var(--midground) 50%, transparent);">
-                    将所有偏好（主题、CRT、自动刷新、间隔、默认分类/标签页、端口）恢复为初始默认值。
-                  </div>
-                  <button @click="resetPreferences()"
-                          class="px-4 py-2 rounded text-[11px] font-bold transition-all hover:bg-red-500/20 border"
-                          style="color: color-mix(in srgb, var(--midground) 70%, transparent); border-color: var(--card-border);">
-                    恢复默认设置
-                  </button>
-                </div>
-              </div>
-            </div>
-
           </div>
         </div>
 
-        <!-- Footer -->
-        <div class="border-t border-[var(--card-border)] px-5 py-3 flex justify-between items-center shrink-0">
-          <div class="text-[10px]"
-               style="color: color-mix(in srgb, var(--midground) 40%, transparent);">
-            设置自动保存
+        <!-- 02 APPEARANCE -->
+        <div v-if="activeSettingsSection === 'appearance'">
+          <div class="settings-section-head">
+            <div class="settings-eyebrow">SECTION 02 / 视觉效果</div>
+            <div class="settings-h1">外观</div>
+            <div class="settings-hint">CRT 扫描线模拟复古显示器的逐行扫描效果,可独立开关不影响主题。</div>
           </div>
-          <button @click="showSettingsModal = false"
-                  class="px-5 py-2 rounded text-[11px] font-bold transition-all"
-                  style="background: var(--glow-color); color: var(--midground);">
-            完成
-          </button>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">CRT 扫描线</div>
+              <div class="settings-row-desc">覆盖全屏的水平扫描线 + RGB 偏移</div>
+            </div>
+            <label class="settings-toggle">
+              <input type="checkbox" :checked="crtEnabled" @change="crtEnabled = $event.target.checked; toggleCrtEffects()">
+              <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 03 REFRESH -->
+        <div v-if="activeSettingsSection === 'refresh'">
+          <div class="settings-section-head">
+            <div class="settings-eyebrow">SECTION 03 / 数据刷新</div>
+            <div class="settings-h1">刷新</div>
+            <div class="settings-hint">自动刷新间隔决定轮询频率。</div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">自动刷新</div>
+              <div class="settings-row-desc">开启后按设定间隔拉取端口/进程状态</div>
+            </div>
+            <label class="settings-toggle">
+              <input type="checkbox" :checked="autoRefresh" @change="toggleAutoRefresh()">
+              <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+            </label>
+          </div>
+          <div class="settings-row" :class="!autoRefresh ? 'is-disabled' : ''">
+            <div class="settings-row-main">
+              <div class="settings-row-title">刷新间隔</div>
+              <div class="settings-row-desc">3 秒最实时,60 秒最省资源</div>
+            </div>
+            <div class="settings-segmented">
+              <button v-for="opt in [3,5,10,15,30,60]" :key="opt"
+                      @click="setRefreshInterval(opt)"
+                      :class="refreshInterval === opt ? 'is-active' : ''"
+                      :disabled="!autoRefresh">{{ opt }}s</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 04 DEFAULTS -->
+        <div v-if="activeSettingsSection === 'defaults'">
+          <div class="settings-section-head">
+            <div class="settings-eyebrow">SECTION 04 / 启动默认值</div>
+            <div class="settings-h1">默认</div>
+            <div class="settings-hint">下次进入控制台时的初始视图偏好。</div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">默认标签页</div>
+              <div class="settings-row-desc">打开控制台时优先显示哪个面板</div>
+            </div>
+            <div class="settings-segmented">
+              <button v-for="opt in defaultTabOptions" :key="opt.id"
+                      @click="setDefaultTab(opt.id)"
+                      :class="opt.id === activeTab ? 'is-active' : ''">{{ opt.label }}</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">默认分类</div>
+              <div class="settings-row-desc">本地端口面板首次加载时的过滤类别</div>
+            </div>
+            <div class="settings-segmented">
+              <button v-for="opt in [{id:'all',label:'全部'},{id:'user',label:'用户'},{id:'creative',label:'创意'},{id:'network',label:'网络'},{id:'system',label:'系统'}]" :key="opt.id"
+                      @click="setDefaultCategory(opt.id)"
+                      :class="opt.id === localCategoryFilter ? 'is-active' : ''">{{ opt.label }}</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 05 ADVANCED -->
+        <div v-if="activeSettingsSection === 'advanced'">
+          <div class="settings-section-head">
+            <div class="settings-eyebrow">SECTION 05 / 高级</div>
+            <div class="settings-h1">高级</div>
+            <div class="settings-hint">涉及服务行为变更,修改后通常需要重启。</div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">控制台绑定端口</div>
+              <div class="settings-row-desc">修改后需重启服务生效,默认 9229</div>
+            </div>
+            <input type="number" v-model.number="dashboardPort" min="1024" max="65535"
+                   class="settings-input w-24 text-right">
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">恢复默认设置</div>
+              <div class="settings-row-desc">清空所有偏好并回到出厂状态,不可撤销</div>
+            </div>
+            <button @click="resetPreferences" class="settings-btn-danger">恢复默认</button>
+          </div>
+          <div class="settings-info-card mt-5">
+            <div class="flex items-start gap-2">
+              <svg class="w-3.5 h-3.5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+              </svg>
+              <div class="leading-relaxed">
+                偏好保存在 mydashboard-config.json。点击"恢复默认"会清空该文件并刷新页面。
+              </div>
+            </div>
+          </div>
         </div>
 
       </div>
+
+    <!-- Footer -->
+    <div class="settings-footer px-6 py-3 border-t border-[var(--card-border)] flex items-center justify-between shrink-0">
+      <div class="text-[10px] settings-eyebrow flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" style="box-shadow: 0 0 6px #10b981"></span>
+        偏好已自动保存
+      </div>
+      <div class="flex items-center gap-2">
+        <button @click="showSettingsModal = false" class="settings-btn-ghost">关闭</button>
+        <button @click="showSettingsModal = false" class="settings-btn-primary">保存并关闭</button>
+      </div>
     </div>
-    <!-- 弹窗：新增/修改托管项目配置 -->
+  </div>
+</div>
+<!-- 弹窗：新增/修改托管项目配置 -->
     <div 
       v-if="showProjectModal" 
       class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
@@ -2186,10 +2413,11 @@ const resetPreferences = async () => {
           dashboardPort,
           runningPort,
           setTheme,
-          toggleCrtEffects,
-          setRefreshInterval,
-          setDefaultCategory,
-          setDefaultTab,
+                    toggleCrtEffects,
+                    setRefreshInterval,
+                    refreshInterval,
+                    setDefaultCategory,
+                    setDefaultTab,
           saveDashboardPort,
           savePreference,
           fetchPreferences,

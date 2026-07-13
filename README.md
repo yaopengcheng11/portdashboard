@@ -399,6 +399,16 @@ MIT License
 
 ## 更新日志
 
+### v2026.07-3 — 设置面板 UI 重设 + 主题卡紧凑化
+
+**UI 重设:**
+- ✨ **SETTING 按钮位置优化** —— 从 header 中间（夹在 LOGO 与状态卡之间）挪到与 LOGO 同行右侧，使用 `flex-1` 弹性空间分隔，齿轮 icon 琥珀色 + hover 旋转 45° 动画 + 悬停显示 ⌘, 快捷键提示
+- ✨ **Settings 弹窗全新设计** —— 三段布局：Header（图标 + eyebrow "SETTINGS / 设置" + 主标题 "控制中心偏好" + 当前主题 chip + ✕ 关闭），Sidebar 168px（5 个分区:主题/外观/刷新/默认视图/高级，各带 icon + 中英双语标签 + 选中态左侧 3px 色条 + 琥珀背景），Content 区加大到 560px（主题卡 2 列网格 + toggle/segmented/input 等组件），Footer（自动保存状态指示 + 关闭/保存并关闭双按钮），780px × 82vh 居中阴影浮层 + fade/pop 入场动画
+- ✨ **主题卡紧凑化** —— 从"3 列巨型彩色预览卡(~80px 高 × 250px 宽)"改为"2 列紧凑行(~50px 高 × 200px 宽)"，左侧 12px swatch 圆点带 glow，中间双行文字(Emerald / 深绿琥珀)，右上对勾表示选中态；7 张卡 4 行展示完，无滚动条
+- 🔧 **CSS 块位置修正** —— Vue 模板内 `<style>` 块被当作副作用标签忽略导致 CSS 不生效；移到 `<head>` 内 `<title>` 之后，所有 `.settings-*` 样式正常加载
+- 🔧 **header 布局重构** —— 从 `justify-between` 三栏(LOGO + SETTING + 4 状态卡)改为 LOGO + flex-1 弹性空间 + SETTING + 4 状态卡，SETTING 不再跟状态卡抢右侧空间
+
+
 ### v2026.07 — 模块化重构 + 4 项功能升级
 
 **新功能：**
@@ -415,7 +425,7 @@ MIT License
 
 **新功能：**
 - ✨ **设置面板 (`/api/preferences`)** —— 主题 / 默认分类 / 自动刷新 / 刷新间隔 / 绑定端口,服务端 `mydashboard-config.json` 持久化
-- ✨ **设置面板 UI 落地** —— header 右侧 `SETTING` 按钮，2 栏布局弹窗（200px 导航 + 内容区，720px 居中，80vh 高度），5 个分区（主题/外观/刷新/默认视图/高级），7 个主题实时切换（dark-emerald / blueprint / midnight / arctic / terra / neon / velvet），所有偏好改动即时持久化到后端
+- ✨ **设置面板 UI 落地** —— header 与 LOGO 同行的 `SETTING` 按钮（齿轮 icon + hover 旋转 + ⌘, 快捷键提示），弹窗采用三段布局：Header（图标 + 双行标题 + 当前主题标签 + 关闭）、Sidebar（168px，5 个分区带 icon + 中英双语 + 选中态左侧色条）、Content（560px，主题卡 2 列紧凑布局 + toggle/segmented/input 等组件）、Footer（自动保存提示 + 关闭/保存按钮），780px × 82vh 居中阴影浮层，7 个主题实时切换（dark-emerald / blueprint / midnight / arctic / terra / neon / velvet），所有偏好改动即时持久化到后端
 - ✨ **服务端默认值 hydrate** —— UI 首屏渲染前就有 theme/refresh 配置,避免 FOUC
 - ✨ **HTML `Cache-Control: no-store`** —— 仪表板强制不走缓存,改后端代码即可见
 
