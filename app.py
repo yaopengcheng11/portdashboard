@@ -42,48 +42,28 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MyDashboard - Port Control Center", lifespan=lifespan)
 
 
-class DynamicCORSMiddleware(BaseHTTPMiddleware):
-    """动态 CORS 中间件：自动检测系统活动端口并放行"""
+class LocalCORSMiddleware(BaseHTTPMiddleware):
+    """仅放行面板自身来源的 CORS 请求（前端与 API 同源，正常情况下不需要跨域）"""
 
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin", "")
-
-        # 基础白名单
         allowed_origins = {
-            "http://localhost:9229",
-            "http://127.0.0.1:9229",
+            f"http://localhost:{RUNNING_PORT}",
+            f"http://127.0.0.1:{RUNNING_PORT}",
+            f"http://localhost:{DEFAULT_PORT}",
+            f"http://127.0.0.1:{DEFAULT_PORT}",
         }
 
-        # 自动检测系统所有活动端口（使用缓存，3秒TTL）
-        try:
-            active_ports = get_active_system_ports()
-            for port_info in active_ports:
-                port = port_info.get("port")
-                if port:
-                    allowed_origins.add(f"http://localhost:{port}")
-                    allowed_origins.add(f"http://127.0.0.1:{port}")
-        except Exception:
-            pass
-
-        # 处理 preflight 请求
-        if request.method == "OPTIONS":
-            response = await call_next(request)
-            if origin in allowed_origins:
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers["Access-Control-Allow-Methods"] = "*"
-                response.headers["Access-Control-Allow-Headers"] = "*"
-                response.headers["Access-Control-Allow-Credentials"] = "true"
-            return response
-
-        # 正常请求
         response = await call_next(request)
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+            if request.method == "OPTIONS":
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         return response
 
 
-app.add_middleware(DynamicCORSMiddleware)
+app.add_middleware(LocalCORSMiddleware)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -104,6 +84,7 @@ if os.path.exists(STATIC_DIR):
 
 ACTIVE_PROCESSES: Dict[str, subprocess.Popen] = {}
 ACTIVE_LOG_FILES: Dict[str, io.IOBase] = {}
+PROC_LOCK = threading.RLock()
 START_TIME = time.time()
 PORTS_CACHE = {"timestamp": 0.0, "value": []}
 STATS_CACHE = {"timestamp": 0.0, "value": {}}
@@ -112,6 +93,15 @@ PIDS_LOCK = threading.Lock()
 PORTS_CACHE_LOCK = threading.Lock()
 STATS_CACHE_LOCK = threading.Lock()
 PORTS_REFRESH_THREAD_STARTED = False
+
+HTTP_PROBE_CACHE: Dict[int, Tuple[float, bool]] = {}
+HTTP_PROBE_CACHE_TTL = 30.0
+HTTP_PROBE_CACHE_LOCK = threading.Lock()
+HTTP_PROBE_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="http-probe")
+
+PROJECT_NAME_CACHE: Dict[int, Tuple[float, str]] = {}
+PROJECT_NAME_CACHE_TTL = 60.0
+PROJECT_NAME_CACHE_LOCK = threading.Lock()
 
 
 class Project(BaseModel):
@@ -237,6 +227,27 @@ def is_pid_running(pid: int) -> bool:
     return psutil.pid_exists(pid)
 
 
+def _infer_project_name_for_pid(pid: int) -> str:
+    now = time.time()
+    with PROJECT_NAME_CACHE_LOCK:
+        cached = PROJECT_NAME_CACHE.get(pid)
+        if cached and now - cached[0] < PROJECT_NAME_CACHE_TTL:
+            return cached[1]
+    name = ""
+    try:
+        cwd = psutil.Process(pid).cwd()
+        name = infer_project_display_name(cwd) or ""
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        pass
+    with PROJECT_NAME_CACHE_LOCK:
+        PROJECT_NAME_CACHE[pid] = (now, name)
+        if len(PROJECT_NAME_CACHE) > 512:
+            for key, (ts, _) in list(PROJECT_NAME_CACHE.items()):
+                if now - ts >= PROJECT_NAME_CACHE_TTL:
+                    PROJECT_NAME_CACHE.pop(key, None)
+    return name
+
+
 def parse_listening_ports() -> List[dict]:
     ports_info = []
     seen_ports = set()
@@ -252,18 +263,10 @@ def parse_listening_ports() -> List[dict]:
             project_name = ""
             if pid:
                 try:
-                    proc = psutil.Process(pid)
-                    proc_name = proc.name()
-                    # Try to infer project name from working directory
-                    try:
-                        cwd = proc.cwd()
-                        inferred = infer_project_display_name(cwd)
-                        if inferred:
-                            project_name = inferred
-                    except (psutil.AccessDenied, psutil.NoSuchProcess):
-                        pass
+                    proc_name = psutil.Process(pid).name()
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
+                project_name = _infer_project_name_for_pid(pid)
             ports_info.append({
                 "address": f"{conn.laddr.ip}:{port}",
                 "port": port,
@@ -304,7 +307,9 @@ def _enrich_with_dashboard_project(ports: List[dict]) -> List[dict]:
     """
     # Build PID -> project_id map from ACTIVE_PROCESSES
     pid_to_project = {}
-    for project_id, proc in ACTIVE_PROCESSES.items():
+    with PROC_LOCK:
+        active_snapshot = dict(ACTIVE_PROCESSES)
+    for project_id, proc in active_snapshot.items():
         try:
             if proc.pid:
                 pid_to_project[proc.pid] = project_id
@@ -364,15 +369,27 @@ def ensure_background_refresh_thread():
     PORTS_REFRESH_THREAD_STARTED = True
 
 
-def cleanup_stale_process_tracking(project_id: str, pids_map: Optional[dict] = None):
-    if project_id in ACTIVE_PROCESSES and ACTIVE_PROCESSES[project_id].poll() is not None:
-        ACTIVE_PROCESSES.pop(project_id, None)
-    if pids_map is None:
+def cleanup_stale_process_tracking(project_id: str, pids_map: Optional[dict] = None) -> bool:
+    """Drop dead entries; returns True if `pids_map` was modified.
+
+    When called without `pids_map`, loads and saves the registry itself;
+    otherwise the caller is responsible for persisting changes.
+    """
+    with PROC_LOCK:
+        proc = ACTIVE_PROCESSES.get(project_id)
+        if proc and proc.poll() is not None:
+            ACTIVE_PROCESSES.pop(project_id, None)
+    standalone = pids_map is None
+    if standalone:
         pids_map = load_running_pids()
+    dirty = False
     entry = pids_map.get(project_id)
     if entry and not is_pid_running(entry["pid"]):
         pids_map.pop(project_id, None)
+        dirty = True
+    if dirty and standalone:
         save_running_pids(pids_map)
+    return dirty
 
 
 def readopt_processes():
@@ -431,10 +448,10 @@ def get_system_stats_snapshot(force_refresh: bool = False) -> dict:
     return snapshot
 
 
-def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map: dict) -> dict:
+def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map: dict) -> Tuple[dict, bool]:
     project_id = project["id"]
     target_port = project["port"]
-    cleanup_stale_process_tracking(project_id, pids_map)
+    dirty = cleanup_stale_process_tracking(project_id, pids_map)
 
     port_match = next((p for p in active_ports if p["port"] == target_port), None)
     status = "stopped"
@@ -442,14 +459,17 @@ def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map:
     process_owner = "Unknown"
     managed = False
 
-    proc = ACTIVE_PROCESSES.get(project_id)
-    if proc and proc.poll() is None:
+    with PROC_LOCK:
+        proc = ACTIVE_PROCESSES.get(project_id)
+        if proc and proc.poll() is not None:
+            ACTIVE_PROCESSES.pop(project_id, None)
+            proc = None
+    if proc:
         status = "running"
         current_pid = proc.pid
         process_owner = "Dashboard"
         managed = True
     else:
-        ACTIVE_PROCESSES.pop(project_id, None)
         entry = pids_map.get(project_id)
         if entry and is_pid_running(entry["pid"]):
             status = "running"
@@ -458,14 +478,14 @@ def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map:
             managed = True
         elif entry:
             pids_map.pop(project_id, None)
-            save_running_pids(pids_map)
+            dirty = True
 
     if status == "stopped" and port_match:
         status = "external"
         current_pid = port_match["pid"]
         process_owner = f"External ({port_match['process']})"
 
-    return {
+    state = {
         **project,
         "status": status,
         "pid": current_pid,
@@ -474,6 +494,7 @@ def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map:
         "port_process": port_match,
         "managed": managed,
     }
+    return state, dirty
 
 
 def get_projects_snapshot(active_ports: Optional[List[dict]] = None) -> List[dict]:
@@ -481,7 +502,15 @@ def get_projects_snapshot(active_ports: Optional[List[dict]] = None) -> List[dic
     if active_ports is None:
         active_ports = get_active_system_ports()
     pids_map = load_running_pids()
-    return [get_project_runtime_state(project, active_ports, pids_map) for project in projects]
+    states = []
+    dirty = False
+    for project in projects:
+        state, changed = get_project_runtime_state(project, active_ports, pids_map)
+        dirty = dirty or changed
+        states.append(state)
+    if dirty:
+        save_running_pids(pids_map)
+    return states
 
 
 def check_http_port(port: int, timeout: float = 1.5) -> bool:
@@ -492,6 +521,44 @@ def check_http_port(port: int, timeout: float = 1.5) -> bool:
     return _check_http_port_impl(port, timeout)
 
 
+def check_http_port_cached(port: int) -> bool:
+    now = time.time()
+    with HTTP_PROBE_CACHE_LOCK:
+        cached = HTTP_PROBE_CACHE.get(port)
+        if cached and now - cached[0] < HTTP_PROBE_CACHE_TTL:
+            return cached[1]
+    result = check_http_port(port)
+    with HTTP_PROBE_CACHE_LOCK:
+        HTTP_PROBE_CACHE[port] = (time.time(), result)
+    return result
+
+
+PROTECTED_PROCESSES_WINDOWS = {
+    "svchost.exe", "csrss.exe", "smss.exe", "wininit.exe",
+    "winlogon.exe", "lsass.exe", "services.exe", "system",
+    "idle", "memory compression", "registry",
+}
+PROTECTED_PROCESSES_UNIX = {
+    "init", "systemd", "launchd", "kernel_task",
+    "kthreadd", "ksoftirqd", "migration", "kworker",
+}
+
+
+def _kill_process_tree(pid: int) -> bool:
+    """Kill a process and all its children directly via psutil. Best-effort."""
+    try:
+        proc = psutil.Process(pid)
+        for child in proc.children(recursive=True):
+            try:
+                child.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        proc.kill()
+        return True
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+
+
 def categorize_process(process_name: str, ports: list) -> str:
     """Categorize a process into user-facing groups."""
     name = process_name.lower()
@@ -499,17 +566,12 @@ def categorize_process(process_name: str, ports: list) -> str:
     name_no_ext = name.replace('.exe', '') if name.endswith('.exe') else name
 
     # System/vendor services: should not be stopped
-    SYSTEM_PROCESSES = {
-        # Windows
-        'svchost.exe', 'csrss.exe', 'smss.exe', 'wininit.exe',
-        'winlogon.exe', 'lsass.exe', 'services.exe',
+    SYSTEM_PROCESSES = PROTECTED_PROCESSES_WINDOWS | PROTECTED_PROCESSES_UNIX | {
+        # Windows vendor services
         'vpnagent.exe', 'cer_service.exe', 'agentshell_guard.exe',
         'asus_framework.exe', 'rogiveservice.exe', 'armourycrate.service.exe',
         'rogliveservice.exe', 'alilangclient.exe',
-        'system', 'idle', 'memory compression', 'registry',
         # Unix/macOS
-        'init', 'systemd', 'launchd', 'kernel_task',
-        'kthreadd', 'ksoftirqd', 'migration', 'kworker',
         'dbus-daemon', 'polkitd', 'networkmanager',
         'vpnagent', 'cer_service', 'agentshell_guard',
     }
@@ -562,23 +624,22 @@ def group_ports_by_process(ports: List[dict]) -> List[dict]:
         if pid:
             groups[pid].append(port_info)
 
+    # Probe all ports once via the shared pool (results cached with TTL)
+    all_port_infos = [p for port_list in groups.values() for p in port_list]
+    http_futures = {
+        HTTP_PROBE_POOL.submit(check_http_port_cached, p['port']): p
+        for p in all_port_infos
+    }
+    for future in concurrent.futures.as_completed(http_futures):
+        port_info = http_futures[future]
+        try:
+            port_info['is_http'] = future.result()
+        except Exception:
+            port_info['is_http'] = False
+
     result = []
     for pid, port_list in groups.items():
-        # Sort ports by port number
         port_list.sort(key=lambda p: p['port'])
-
-        # Detect HTTP capability for each port (in parallel)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            http_futures = {
-                executor.submit(check_http_port, p['port']): p
-                for p in port_list
-            }
-            for future in concurrent.futures.as_completed(http_futures):
-                port_info = http_futures[future]
-                try:
-                    port_info['is_http'] = future.result()
-                except Exception:
-                    port_info['is_http'] = False
 
         # Find primary port (first HTTP port, or lowest port number)
         http_ports = [p for p in port_list if p.get('is_http')]
@@ -659,22 +720,9 @@ def terminate_managed_pid(pid: int) -> bool:
         return False
 
     try:
-        proc = psutil.Process(pid)
-        proc_name = proc.name().lower()
-
-        if IS_WINDOWS:
-            PROTECTED_PROCESSES = {
-                "svchost.exe", "csrss.exe", "smss.exe", "wininit.exe",
-                "winlogon.exe", "lsass.exe", "services.exe", "system",
-                "idle", "memory compression", "registry"
-            }
-        else:
-            PROTECTED_PROCESSES = {
-                "init", "systemd", "launchd", "kernel_task",
-                "kthreadd", "ksoftirqd", "migration", "kworker"
-            }
-
-        if proc_name in PROTECTED_PROCESSES:
+        proc_name = psutil.Process(pid).name().lower()
+        protected = PROTECTED_PROCESSES_WINDOWS if IS_WINDOWS else PROTECTED_PROCESSES_UNIX
+        if proc_name in protected:
             print(f"Refused to kill protected system process: {proc_name} (PID {pid})")
             return False
     except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -693,20 +741,10 @@ def terminate_managed_pid(pid: int) -> bool:
                 os.killpg(os.getpgid(pid), signal.SIGTERM)
             except (ProcessLookupError, PermissionError):
                 # If process group kill fails, try killing the process directly
-                proc = psutil.Process(pid)
-                for child in proc.children(recursive=True):
-                    child.kill()
-                proc.kill()
+                _kill_process_tree(pid)
             return True
     except Exception:
-        try:
-            proc = psutil.Process(pid)
-            for child in proc.children(recursive=True):
-                child.kill()
-            proc.kill()
-            return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return False
+        return _kill_process_tree(pid)
 
 
 def append_log_line(project_id: str, text: str):
@@ -812,21 +850,23 @@ def delete_project(project_id: str):
     return {"success": True}
 
 
-def _wait_for_startup(proc: subprocess.Popen, timeout_sec: int, health_url: str) -> Tuple[bool, str]:
+def _probe_health_url(health_url: str) -> bool:
+    try:
+        with urllib.request.urlopen(health_url, timeout=2) as resp:
+            return 200 <= resp.status < 300
+    except (urllib.error.URLError, ConnectionError, OSError, TimeoutError):
+        return False
+
+
+async def _wait_for_startup(proc: subprocess.Popen, timeout_sec: int, health_url: str) -> Tuple[bool, str]:
     """
     Wait up to `timeout_sec` for `proc` to come up.
 
-    If `health_url` is non-empty, polls it via urllib until a 2xx is seen or timeout.
-    Otherwise falls back to checking that the process is still alive (poll() is None)
-    and that the listening port (proc.pid port-inferred via the kernel is not reliable
-    across platforms) is open — for the no-health-check case we just confirm the
-    process didn't exit immediately.
+    If `health_url` is non-empty, polls it until a 2xx is seen or timeout.
+    Otherwise just confirms the process didn't exit immediately.
 
     Returns (ok, error_message). On success error_message is empty.
     """
-    import urllib.request as _ur
-    import urllib.error as _ue
-
     deadline = time.time() + max(1, int(timeout_sec))
     poll_interval = 0.5
 
@@ -835,20 +875,15 @@ def _wait_for_startup(proc: subprocess.Popen, timeout_sec: int, health_url: str)
         if proc.poll() is not None:
             return False, f"process exited with code {proc.returncode} before becoming ready"
 
-        if health_url:
-            try:
-                with _ur.urlopen(health_url, timeout=2) as resp:
-                    if 200 <= resp.status < 300:
-                        return True, ""
-            except (_ue.URLError, _ue.HTTPError, ConnectionError, OSError, TimeoutError):
-                # Still warming up — keep polling until deadline.
-                pass
-        else:
+        if not health_url:
             # No health URL: as soon as the process is still alive past the first
             # tick, treat it as started (matches previous "fire-and-forget" behavior).
             return True, ""
 
-        time.sleep(poll_interval)
+        if await asyncio.to_thread(_probe_health_url, health_url):
+            return True, ""
+
+        await asyncio.sleep(poll_interval)
 
     # Timed out.
     if health_url:
@@ -860,26 +895,15 @@ def _kill_active_proc(project_id: str, proc: subprocess.Popen) -> None:
     """Best-effort kill of `proc` (and its children) plus state cleanup."""
     try:
         if proc.poll() is None:
-            try:
-                parent = psutil.Process(proc.pid)
-                for child in parent.children(recursive=True):
-                    try:
-                        child.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-            try:
-                proc.kill()
-            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-                pass
+            _kill_process_tree(proc.pid)
             try:
                 proc.wait(timeout=2)
             except Exception:
                 pass
     finally:
-        ACTIVE_PROCESSES.pop(project_id, None)
-        log_f = ACTIVE_LOG_FILES.pop(project_id, None)
+        with PROC_LOCK:
+            ACTIVE_PROCESSES.pop(project_id, None)
+            log_f = ACTIVE_LOG_FILES.pop(project_id, None)
         if log_f is not None:
             try:
                 log_f.close()
@@ -888,14 +912,15 @@ def _kill_active_proc(project_id: str, proc: subprocess.Popen) -> None:
 
 
 @app.post("/api/projects/{project_id}/start")
-def start_project(project_id: str):
+async def start_project(project_id: str):
     project_id = validate_project_id(project_id)
     projects = load_projects()
     project = next((p for p in projects if p["id"] == project_id), None)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    current_state = next((p for p in get_projects_snapshot() if p["id"] == project_id), None)
+    snapshot = await asyncio.to_thread(get_projects_snapshot)
+    current_state = next((p for p in snapshot if p["id"] == project_id), None)
     if current_state and current_state["status"] == "running" and current_state["managed"]:
         raise HTTPException(status_code=400, detail=f"Project '{project['name']}' is already running under dashboard management")
     if current_state and current_state["status"] == "external":
@@ -911,7 +936,7 @@ def start_project(project_id: str):
     argv, env_overrides = parse_command(project["command"])
 
     # Pre-flight: 检查目标端口是否已被外部进程占用（强制刷新端口快照，避免竞态）
-    active_ports = get_active_system_ports(force_refresh=True)
+    active_ports = await asyncio.to_thread(get_active_system_ports, True)
     port_conflict = next(
         (p for p in active_ports if p.get("port") == project["port"]),
         None,
@@ -919,7 +944,8 @@ def start_project(project_id: str):
     if port_conflict:
         pid = port_conflict.get("pid")
         # 如果占用方就是本面板管理的进程（即已在 ACTIVE_PROCESSES），允许
-        is_managed = any(proc.pid == pid for proc in ACTIVE_PROCESSES.values() if pid)
+        with PROC_LOCK:
+            is_managed = any(proc.pid == pid for proc in ACTIVE_PROCESSES.values() if pid)
         if not is_managed:
             proc_name = port_conflict.get("process", "Unknown")
             raise HTTPException(
@@ -967,8 +993,9 @@ def start_project(project_id: str):
                 start_new_session=True,
             )
 
-        ACTIVE_PROCESSES[project_id] = proc
-        ACTIVE_LOG_FILES[project_id] = log_file
+        with PROC_LOCK:
+            ACTIVE_PROCESSES[project_id] = proc
+            ACTIVE_LOG_FILES[project_id] = log_file
 
         # Resolve startup timeout (clamp to 1..300s) and optional health URL.
         raw_timeout = project.get("startup_timeout_sec", 30)
@@ -979,7 +1006,7 @@ def start_project(project_id: str):
         timeout_sec = max(1, min(timeout_sec, 300))
         health_url = (project.get("health_check_url") or "").strip()
 
-        ok, err = _wait_for_startup(proc, timeout_sec, health_url)
+        ok, err = await _wait_for_startup(proc, timeout_sec, health_url)
         if not ok:
             _kill_active_proc(project_id, proc)
             try:
@@ -1031,21 +1058,22 @@ def stop_project(project_id: str):
     pids_map = load_running_pids()
     entry = pids_map.get(project_id)
     pid = None
-    if project_id in ACTIVE_PROCESSES:
-        pid = ACTIVE_PROCESSES[project_id].pid
-        ACTIVE_PROCESSES.pop(project_id, None)
+    with PROC_LOCK:
+        proc = ACTIVE_PROCESSES.pop(project_id, None)
+        log_file = ACTIVE_LOG_FILES.pop(project_id, None)
+    if proc:
+        pid = proc.pid
     elif entry:
         pid = entry["pid"]
 
-    if not pid:
-        return {"success": True, "message": "Project is not running (no managed process to stop)"}
-
-    log_file = ACTIVE_LOG_FILES.pop(project_id, None)
     if log_file:
         try:
             log_file.close()
         except Exception:
             pass
+
+    if not pid:
+        return {"success": True, "message": "Project is not running (no managed process to stop)"}
 
     success = terminate_managed_pid(pid)
     pids_map.pop(project_id, None)
@@ -1204,8 +1232,8 @@ DEFAULT_PREFERENCES = {
     "port": DEFAULT_PORT,          # binding port; takes effect after restart
 }
 
-# Set by __main__ right before uvicorn.run() binds the socket.
-# Before then, falls back to DEFAULT_PORT so import-time reads are safe.
+# Resolved at import time (uvicorn re-imports this module, so setting it in
+# __main__ would not propagate). Env var > preferences file > default.
 RUNNING_PORT: int = DEFAULT_PORT
 
 
@@ -1257,13 +1285,26 @@ def save_preferences(prefs: dict) -> dict:
     return coerced
 
 
+def _resolve_bind_port() -> int:
+    """Env var > preferences file > 9229 default."""
+    env_port = os.environ.get("MYDASHBOARD_PORT")
+    if env_port and env_port.isdigit():
+        return int(env_port)
+    try:
+        file_port = load_preferences().get("port")
+        if isinstance(file_port, int) and 1 <= file_port <= 65535:
+            return file_port
+    except Exception:
+        pass
+    return DEFAULT_PORT
+
+
+RUNNING_PORT = _resolve_bind_port()
+
+
 @app.get("/api/preferences")
 def get_preferences():
-    """Return current preferences + the actually-running port.
-
-    `running_port` is set by __main__ right before uvicorn.run(); before that
-    (e.g. during tests or import) it falls back to DEFAULT_PORT.
-    """
+    """Return current preferences + the actually-running port."""
     prefs = load_preferences()
     return {
         "preferences": prefs,
@@ -1300,22 +1341,8 @@ def update_preferences(prefs: dict):
 if __name__ == "__main__":
     import uvicorn
 
-    # Prefer env var > preferences file > 9229 default.
-    # NOTE: changing this requires a server restart — the port is bound once.
-    def _resolve_bind_port() -> int:
-        env_port = os.environ.get("MYDASHBOARD_PORT")
-        if env_port and env_port.isdigit():
-            return int(env_port)
-        try:
-            prefs = load_preferences()
-            file_port = prefs.get("port")
-            if isinstance(file_port, int) and 1 <= file_port <= 65535:
-                return file_port
-        except Exception:
-            pass
-        return DEFAULT_PORT
-
     reload_enabled = os.environ.get("PORT_DASHBOARD_RELOAD", "0") == "1"
-    bind_port = _resolve_bind_port()
-    print(f"[mydashboard] binding to 0.0.0.0:{bind_port} (set MYDASHBOARD_PORT=... to override)")
-    uvicorn.run("app:app", host="0.0.0.0", port=bind_port, reload=reload_enabled)
+    # 默认只监听本机；需要局域网访问时显式设置 MYDASHBOARD_HOST=0.0.0.0
+    bind_host = os.environ.get("MYDASHBOARD_HOST", "127.0.0.1")
+    print(f"[mydashboard] binding to {bind_host}:{RUNNING_PORT} (set MYDASHBOARD_PORT/MYDASHBOARD_HOST to override)")
+    uvicorn.run("app:app", host=bind_host, port=RUNNING_PORT, reload=reload_enabled)
