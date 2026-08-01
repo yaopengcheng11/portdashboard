@@ -20,7 +20,10 @@
     "name": "NexArt AI Workflow",
     "cwd": "G:\\AITOOLS\\NexArtWorkFlow",
     "command": "npm run dev",
-    "port": 3000,
-    "description": "基于 React Flow 与 Vite 的可视化 AI 提示词工程和创意工作流开发环境"
+    "port": 6677,
+    "description": "基于 React Flow 与 Vite 的可视化 AI 提示词工程和创意工作流开发环境",
+    "sync_name": false,
+    "startup_timeout_sec": 30,
+    "health_check_url": ""
   }
 ]

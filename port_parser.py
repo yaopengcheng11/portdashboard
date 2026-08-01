@@ -1,13 +1,13 @@
-"""port_parser — Platform-specific port-listening parsers.
+"""port_parser — 平台相关的监听端口枚举。
 
-Split out of app.py to break up a 100+ line function (cognitive 97) into
-focused helpers. Each helper owns ONE platform's netstat / process-listing
-quirk so it can be unit-tested in isolation and extended without growing
-the dispatcher.
+从 app.py 拆出，每个 helper 只负责一个平台的怪癖，便于单独测试。
+Windows 走 ``netstat -ano`` 文本解析；macOS / Linux 逐进程枚举
+（见 ``_listening_from_psutil_procs`` 里为何不用 netstat）。
 
 Public surface:
     build_pid_name_map()  -> Dict[int, str]
     parse_listening_ports(pid_to_name)  -> List[dict]
+    format_addr(ip, port)  -> str
 """
 
 from __future__ import annotations
@@ -19,11 +19,8 @@ import subprocess
 import sys
 from typing import Dict, List
 
-# Platform flags — duplicated from app.py so port_parser.py stays
-# standalone (no circular import). Keep these in sync with app.py:28-30.
+# 与 app.py 保持一致（此处不 import app，避免循环依赖）
 IS_WINDOWS = sys.platform == "win32"
-IS_LINUX = sys.platform.startswith("linux")
-IS_MACOS = sys.platform == "darwin"
 
 _SUBPROCESS_TIMEOUT = 3.0
 
@@ -77,7 +74,7 @@ def _pid_map_from_psutil() -> Dict[int, str]:
 
 
 def parse_listening_ports(pid_to_name: Dict[int, str]) -> List[dict]:
-    """Run ``netstat`` for the current OS and return LISTENING ports.
+    """Return LISTENING ports for the current OS.
 
     Output shape (one dict per port):
         ``{"address": "0.0.0.0:3000", "port": 3000, "process": "node",
@@ -87,7 +84,7 @@ def parse_listening_ports(pid_to_name: Dict[int, str]) -> List[dict]:
     """
     if IS_WINDOWS:
         return _parse_windows_listening(pid_to_name)
-    return _parse_unix_listening(pid_to_name)
+    return _listening_from_psutil_procs()
 
 
 def _parse_windows_listening(pid_to_name: Dict[int, str]) -> List[dict]:
@@ -138,51 +135,63 @@ def _parse_windows_listening(pid_to_name: Dict[int, str]) -> List[dict]:
     return ports
 
 
-def _parse_unix_listening(pid_to_name: Dict[int, str]) -> List[dict]:
-    """Parse ``netstat -tlnp`` (Linux) or ``netstat -lnp`` (macOS) output."""
-    netstat_args = ["netstat", "-tlnp"] if IS_LINUX else ["netstat", "-lnp"]
-    result = subprocess.run(
-        netstat_args,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="ignore",
-        timeout=_SUBPROCESS_TIMEOUT,
-    )
-    if result.returncode != 0:
-        return []
+def format_addr(ip: str, port: int) -> str:
+    """``127.0.0.1:3000`` / ``[::1]:3000``. 括号避免 ``::1:3000`` 的歧义。"""
+    if ip and ":" in ip:
+        return f"[{ip}]:{port}"
+    return f"{ip or '*'}:{port}"
+
+
+def _listening_from_psutil_procs(proc_iter=None) -> List[dict]:
+    """macOS / Linux：逐进程枚举 LISTEN 连接。
+
+    这是 ``psutil.net_connections()`` 系统级调用失败时的回退路径 ——
+    在 macOS 上它需要 root，总是抛 AccessDenied。
+
+    刻意不走 netstat：macOS 的 ``netstat`` 里 ``-p`` 是 protocol 而非
+    "show PID" 且需要参数（``netstat -lnp`` 直接以 64 退出），地址与端口用
+    ``.`` 而非 ``:`` 分隔，而且根本没有 PID 列 —— 三者叠加使文本解析
+    在 macOS 上不可能得到任何结果。逐进程枚举没有子进程、没有正则、
+    也没有 locale 与输出格式漂移的风险。
+
+    ``proc_iter`` 仅供测试注入，从而不依赖真机进程表。
+    """
+    import psutil  # local import — 与 _pid_map_from_psutil 保持一致
+
+    if proc_iter is None:
+        proc_iter = psutil.process_iter(["pid", "name"])
 
     ports: List[dict] = []
     seen_ports: set = set()
-    for line in result.stdout.splitlines():
-        # e.g.: tcp  0  0  0.0.0.0:3000  0.0.0.0:*  LISTEN  12345/node
-        parts = line.split()
-        if len(parts) < 6:
+    for proc in proc_iter:
+        try:
+            conns = proc.net_connections(kind="tcp")
+        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+            # 非当前用户拥有的进程看不到，属正常（实测约四成会拒绝）
             continue
-        local_addr = parts[3]
-        pid_prog = parts[-1]
-        port_match = re.search(r":(\d+)$", local_addr)
-        if not port_match:
+        except Exception:
             continue
-        port = int(port_match.group(1))
-        if port in seen_ports:
-            continue
-        # Extract "pid/program" — netstat's last column on Linux/macOS.
-        pid = None
-        proc_name = "Unknown"
-        pid_match = re.match(r"(\d+)/", pid_prog)
-        if pid_match:
-            pid = int(pid_match.group(1))
-            proc_name = pid_to_name.get(pid, "Unknown")
-        ports.append(
-            {
-                "address": local_addr,
-                "port": port,
-                "process": proc_name,
-                "pid": pid,
-                "status": "listening",
-                "platform": sys.platform,
-            }
-        )
-        seen_ports.add(port)
+        for conn in conns:
+            if conn.status != "LISTEN":
+                continue
+            laddr = getattr(conn, "laddr", None)
+            port = getattr(laddr, "port", None)
+            if not port or port in seen_ports:
+                continue
+            try:
+                name = proc.info.get("name") or "Unknown"
+                pid = proc.info.get("pid")
+            except (AttributeError, psutil.NoSuchProcess):
+                name, pid = "Unknown", None
+            ports.append(
+                {
+                    "address": format_addr(getattr(laddr, "ip", ""), port),
+                    "port": port,
+                    "process": name,
+                    "pid": pid,
+                    "status": "listening",
+                    "platform": sys.platform,
+                }
+            )
+            seen_ports.add(port)
     return ports

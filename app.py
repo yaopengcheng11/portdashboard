@@ -25,7 +25,11 @@ from starlette.requests import Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from port_parser import build_pid_name_map, parse_listening_ports as _parse_listening_ports_impl
+from port_parser import (
+    build_pid_name_map,
+    parse_listening_ports as _parse_listening_ports_impl,
+    format_addr,
+)
 from http_probe import check_http_port as _check_http_port_impl
 
 IS_WINDOWS = sys.platform == "win32"
@@ -268,34 +272,54 @@ def parse_listening_ports() -> List[dict]:
                     pass
                 project_name = _infer_project_name_for_pid(pid)
             ports_info.append({
-                "address": f"{conn.laddr.ip}:{port}",
+                "address": format_addr(conn.laddr.ip, port),
                 "port": port,
                 "process": proc_name,
                 "pid": pid,
                 "status": "listening",
                 "platform": sys.platform,
                 "project_name": project_name,
+                "cwd": _process_cwd(pid),
             })
             seen_ports.add(port)
     except (psutil.AccessDenied, OSError) as e:
-        print(f"Error parsing ports (psutil): {e}, falling back to netstat")
-        ports_info = _parse_ports_netstat()
+        # macOS 上系统级 net_connections 需要 root，这条回退是常态路径
+        print(f"psutil.net_connections 无权限 ({e})，改用逐进程枚举")
+        ports_info = _parse_ports_fallback()
     return ports_info
 
 
-def _parse_ports_netstat() -> List[dict]:
-    """Fallback port scanner using netstat when psutil lacks permissions.
+def _process_cwd(pid: Optional[int]) -> str:
+    if not pid:
+        return ""
+    try:
+        return psutil.Process(pid).cwd() or ""
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return ""
 
-    Thin dispatcher — real per-platform logic lives in port_parser.py.
-    Kept as a stable name so the cache layer (get_active_system_ports)
-    and any external callers don't have to change.
+
+def _parse_ports_fallback() -> List[dict]:
+    """psutil 系统级调用没权限时的回退端口扫描。
+
+    薄分派层，各平台实现在 port_parser.py。
+    pid→name 映射只有 Windows 的 netstat 解析需要；unix 路径逐进程枚举，
+    进程名随连接一起拿到，不必白建一份 600+ 条的映射。
+
+    项目名与 cwd 的推断在这里补上 —— port_parser 只负责平台差异，
+    不该反过来 import app（会循环依赖）。
     """
     try:
-        pid_to_name = build_pid_name_map()
-        return _parse_listening_ports_impl(pid_to_name)
+        pid_to_name = build_pid_name_map() if IS_WINDOWS else {}
+        ports = _parse_listening_ports_impl(pid_to_name)
     except Exception as e:
-        print(f"Error parsing ports (netstat fallback): {e}")
+        print(f"Error parsing ports (fallback): {e}")
         return []
+
+    for port_info in ports:
+        pid = port_info.get("pid")
+        port_info["project_name"] = _infer_project_name_for_pid(pid) if pid else ""
+        port_info["cwd"] = _process_cwd(pid)
+    return ports
 
 
 def _enrich_with_dashboard_project(ports: List[dict]) -> List[dict]:
@@ -651,7 +675,8 @@ def group_ports_by_process(ports: List[dict]) -> List[dict]:
         result.append({
             'pid': pid,
             'process_name': primary.get('process', 'Unknown'),
-            'cwd': primary.get('project_name', ''),
+            'project_name': primary.get('project_name', ''),
+            'cwd': primary.get('cwd', ''),
             'ports': [p['port'] for p in port_list],
             'primary_port': primary['port'],
             'is_http': primary.get('is_http', False),

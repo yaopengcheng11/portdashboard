@@ -111,12 +111,14 @@ portdashboard/
 ├── templates/index.html        # 前端界面（Vue 3 + 自包含 CSS 设计系统）
 ├── static/fonts/*.woff2        # JetBrains Mono 子集（本地托管）
 ├── requirements-dev.txt        # UI 验证脚手架依赖（pytest + playwright + pillow）
+├── tests/test_app.py           # 后端单元测试（端口扫描 / IPv6 / 进程去重 / 启动解析 / 真机烟雾）
 ├── tests/verify_ui.py          # Playwright 分阶段 UI 断言（7 主题 × 3 标签页截图、tone 分色、键盘契约等）
 ├── logs/*.log                  # 各项目的运行日志
 └── agent-harness/              # CLI 工具和测试（独立子项目）
 ```
 
 > 跑 UI 验证：`pip install -r requirements-dev.txt && playwright install chromium && python3 tests/verify_ui.py --phase 0`
+> 跑后端单测：`python3 -m pytest tests/test_app.py -v`
 
 ---
 
@@ -437,6 +439,45 @@ MIT License
 - ✅ `tests/verify_ui.py` —— 分阶段 Playwright 断言：7 主题 × 3 标签页截图、
   零灰边框、tone 分色、对比度审计、sticky 表头、高度链、CRT 契约、
   对话框键盘契约，以及把原生弹窗打桩为 throw 以证明零残留
+
+### v2026.08-2 — macOS 端口扫描重构 + 项目列表修复
+
+**macOS 端口扫描（关键 bug fix）:**
+- 🐛 **macOS 用户从未看到过任何端口**。旧实现用 `netstat -lnp`，
+  但 macOS 的 `-p` 是 protocol 参数、地址分隔符是 `.` 而非 `:`、
+  且根本不输出 PID 列 —— 三者叠加，进程以 64 退出，**结果永远为空**。
+  改走逐进程 `psutil.net_connections(kind="tcp")` 枚举，跟平台实际能力对齐
+- 🐛 **killProcess 永远拿到 `Unknown` 进程名**。调用方硬传 `platform='windows'`，
+  在 macOS / Linux 上 `systemPorts.find(pid && port && platform=='windows')`
+  永远不命中 → processName 退化为 `Unknown` → 基于进程名的安全规则
+  （svchost / mysqld / clash 等）全部失效。改为只按 pid+port 匹配
+- 🔧 `parse_listening_ports` 拆出 `format_addr(ip, port)` helper，
+  IPv6 强制加方括号（`[::1]:4403` 而非 `::1:4403`，避免跟端口号混淆）
+- 🔧 `_parse_unix_listening` 整段删除（macOS 路径），替换为
+  `_listening_from_psutil_procs`，带 `proc_iter` 注入参数便于单测
+- 🔧 `parse_listening_ports(pid_to_name)` 签名瘦身：
+  Windows 仍要 `pid_to_name`（来自 `tasklist` 文本解析），
+  Unix 路径从进程对象里直接拿 name，调用方无需白建 600+ 条的映射
+
+**端口/项目上下文增强:**
+- ✨ **每条端口 + 每个进程组都带 `cwd` 字段**。
+  `node` / `python3.11` 这种同质化进程名之前完全分不清是哪个项目，
+  现在 UI 在卡片标题下单独显示一行工作目录（深色 mono 风格）
+- ✨ **进程组标题优先用 `project_name`**，回退到 `process_name`；
+  进程名作为 hint 副标题。`cwd` 单独成行，三层信息分开
+- ✨ **外部进程"强制停止"按钮**：原本"外部运行中"那个信息按钮
+  升级为真能 kill 的危险色按钮（受高危安全锁保护，需二次确认），
+  旁边一个 icon 按钮看说明
+- ✨ `app.group_ports_by_process` 字段拆分：`project_name` 与 `cwd` 各管各的，
+  不再借 `project_name` 当 cwd 的占位
+
+**验证:**
+- ✅ `tests/test_app.py::TestListeningPorts` —— 7 个新单测：
+  字段形状 / IPv6 括号 / 同端口去重（先到先得）/ 跳过非 LISTEN /
+  AccessDenied 进程跳过 / `parse_listening_ports({})` 真机烟雾测试
+  （在 CI 上这条是能抓住 macOS 净空列表回归的关键断言）
+- 🧹 `app._parse_ports_netstat` 重命名为 `_parse_ports_fallback`，
+  注释明确"macOS 上 psutil 系统级调用需要 root，这条回退是常态路径"
 
 ### v2026.07-3 — 设置面板 UI 重设 + 主题卡紧凑化
 

@@ -1972,12 +1972,22 @@ function applyTheme(themeId) {
                   </button>
                   <button
                     v-else
-                    @click="showExternalStateHelp(proj)"
+                    @click="killProcess(proj.pid, proj.port)"
                     class="pd-btn pd-btn--tone pd-btn--block"
+                    data-tone="danger"
+                    title="终止占用该端口的外部进程（受高危安全锁保护）"
+                  >
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    强制停止
+                  </button>
+                  <button
+                    v-if="proj.status === 'external'"
+                    @click="showExternalStateHelp(proj)"
+                    class="pd-btn pd-btn--icon"
                     data-tone="info"
+                    title="为什么显示「外部运行中」？"
                   >
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    外部运行中
                   </button>
 
                   <!-- 实时日志 -->
@@ -2054,9 +2064,13 @@ function applyTheme(themeId) {
                       <span v-if="categoryLabel(group.category)" class="pd-badge"
                             :data-tone="categoryTone(group.category)">{{ categoryLabel(group.category) }}</span>
                       <span class="pd-port-num">{{ group.primary_port }}</span>
-                      <span class="pd-card__title pd-truncate">{{ group.cwd ? (group.cwd.split('\\').pop() || group.process_name) : group.process_name }}</span>
-                      <span class="pd-hint">({{ group.process_name }})</span>
+                      <span class="pd-card__title pd-truncate">{{ group.project_name || group.process_name }}</span>
+                      <span v-if="group.project_name" class="pd-hint">{{ group.process_name }}</span>
                     </div>
+
+                    <!-- 工作目录：node / python3.11 这种进程名无法区分是哪个项目 -->
+                    <div v-if="group.cwd && group.cwd !== '/'" class="pd-hint pd-mono pd-truncate"
+                         style="margin-top: 4px;" :title="group.cwd">{{ group.cwd }}</div>
 
                     <!-- 端口列表 -->
                     <div class="pd-hint pd-mono" style="margin-top: 4px;">
@@ -2097,7 +2111,7 @@ function applyTheme(themeId) {
                     </button>
 
                     <button v-if="!safetyLock"
-                            @click="killProcess(group.pid, group.primary_port, 'windows')"
+                            @click="killProcess(group.pid, group.primary_port)"
                             class="pd-btn pd-btn--tone pd-btn--sm" data-tone="danger"
                             title="终止此进程">
                       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -2207,7 +2221,7 @@ function applyTheme(themeId) {
                       </button>
                       <!-- 强杀进程按钮 -->
                       <button v-if="port.pid && port.safety.level !== 'danger'"
-                              @click="killProcess(port.pid, port.port, port.platform || 'windows')"
+                              @click="killProcess(port.pid, port.port)"
                               class="pd-btn pd-btn--tone pd-btn--xs" data-tone="danger">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                         强杀
@@ -3164,8 +3178,11 @@ const resetPreferences = async () => {
           return projects.value.some(p => p.port === port);
         };
 
-        const killProcess = async (pid, port, platform = 'windows') => {
-          const portObj = systemPorts.value.find(p => p.pid === pid && p.port === port && p.platform === platform);
+        const killProcess = async (pid, port) => {
+          /* 只按 pid + port 匹配。曾经还要求 platform 相等，但调用方硬传 'windows'，
+             在 macOS 上永远匹配不上 → processName 退化为 Unknown →
+             基于进程名的安全规则（svchost / mysqld / clash 等）全部失效。 */
+          const portObj = systemPorts.value.find(p => p.pid === pid && p.port === port);
           const processName = portObj ? portObj.process : 'Unknown';
           const safety = getPortSafetyInfo(port, processName);
 
@@ -3187,7 +3204,7 @@ const resetPreferences = async () => {
           }
 
           try {
-            const res = await fetch(`/api/system/ports/kill/${pid}?platform=${platform}`, { method: 'POST' });
+            const res = await fetch(`/api/system/ports/kill/${pid}`, { method: 'POST' });
             const data = await res.json();
             if (res.ok && data.success) {
               notify(data.message || '进程终止成功', 'ok');
