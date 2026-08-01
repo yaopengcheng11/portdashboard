@@ -42,9 +42,9 @@
 - 动态操作系统检测
 
 ### 🎨 界面特性
-- **自动刷新开关**：3 秒间隔轮询，可随时暂停
-- **跨平台 Tailwind CSS**：本地静态文件，无需 CDN
-- **动态 CORS 配置**：自动放行当前监听端口的跨域请求
+- **自动刷新开关**：间隔可在设置面板内调整（3–60s），可随时暂停
+- **自包含 CSS 设计系统**：零框架依赖，7 套主题由 8 个变量驱动，详见 DESIGN.md
+- **本地托管字体**：JetBrains Mono latin 子集，无 CDN 依赖
 - **分类过滤**：快速筛选不同类型的进程
 
 ### ⚙️ 用户偏好与设置面板
@@ -63,6 +63,7 @@
 - **可配置项**：
   - `theme`: `dark-emerald` / `blueprint` / `midnight` / `arctic` / `terra` / `neon` / `velvet`
   - `default_category`: `all` / `user` / `creative`
+  - `default_tab`: `managed` / `local` / `system`（首屏默认标签页）
   - `auto_refresh` (bool) + `refresh_interval` (3 / 5 / 10 / 15 / 30 / 60 秒)
   - `port`: 服务绑定端口（下次启动生效，默认 `9229`）
 - **服务端默认值兜底** —— 启动时读取偏好文件，UI 在首次渲染前就用服务端默认值 hydrate，杜绝 FOUC
@@ -107,11 +108,15 @@ portdashboard/
 ├── start.bat / start.sh        # 跨平台启动脚本
 ├── projects.json               # 托管项目配置（数据文件）
 ├── running_pids.json           # 运行中 PID 缓存
-├── templates/index.html        # 前端界面（Vue 3 + Tailwind）
-├── static/tailwind.min.css     # 本地 Tailwind（离线可用）
+├── templates/index.html        # 前端界面（Vue 3 + 自包含 CSS 设计系统）
+├── static/fonts/*.woff2        # JetBrains Mono 子集（本地托管）
+├── requirements-dev.txt        # UI 验证脚手架依赖（pytest + playwright + pillow）
+├── tests/verify_ui.py          # Playwright 分阶段 UI 断言（7 主题 × 3 标签页截图、tone 分色、键盘契约等）
 ├── logs/*.log                  # 各项目的运行日志
 └── agent-harness/              # CLI 工具和测试（独立子项目）
 ```
+
+> 跑 UI 验证：`pip install -r requirements-dev.txt && playwright install chromium && python3 tests/verify_ui.py --phase 0`
 
 ---
 
@@ -331,7 +336,7 @@ launchctl load ~/Library/LaunchAgents/com.portdashboard.plist
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser (http://localhost:9229/)                            │
-│  Vue 3 + Tailwind CSS · 自动刷新（3s）· 赛博朋克风格       │
+│  Vue 3 + 自包含 CSS · 7 套主题 · 复古 CRT 终端风格          │
 └──────────────────┬──────────────────────────────────────────┘
                    │ HTTP + SSE
                    ▼
@@ -398,6 +403,40 @@ MIT License
 ---
 
 ## 更新日志
+
+### v2026.08 — 全站自包含设计系统 + 移除 Tailwind
+
+**架构:**
+- 🏗️ **彻底移除 Tailwind**。此前 `static/tailwind.min.css` 是过期的 purge 残骸（19KB / 274 类），
+  而内联的 `tailwind.config` 用的是 Play CDN 写法却没有对应 runtime，**每次加载都抛 ReferenceError**，
+  这意味着全部 44 个 `hermes-*` 颜色类从未生效过一天。现已删除框架、配置与样式文件
+- 🎨 **`pd-*` 组件库 + tone 契约**：组件只声明语义 tone（ok/info/warn/danger/self/creative/network/muted），
+  具体色值逐主题校准。4 个安全等级 + 5 个进程分类 + 3 个项目状态共 12 种配色只需一套组件 CSS
+- 🔤 **JetBrains Mono 真正落地**：DESIGN.md 一直要求它，但项目里既无 `@font-face` 也无字体文件。
+  现打包 latin 子集本地托管（2 × 21KB）
+- 📐 DESIGN.md 全文重写为 v2，含「v1 → v2 废弃对照表」
+
+**交互:**
+- 💬 **自建对话框 + toast**，替换全部 29 处原生 `alert()` / `confirm()`。
+  对话框基于 Promise，支持 Esc 取消 / Enter 确认 / 焦点自动落确认键
+- ⌨️ 补齐 ESC 关闭与 `⌘,` 打开设置（界面上一直有提示但从未实现）
+
+**顺带修掉的隐性 bug:**
+- 🐛 CPU / 内存进度条**此前完全不可见**（填充条依赖缺失的 `bg-hermes-accent`）
+- 🐛 header 弹性空隙**永久隐藏**（`md:block` 在裁剪版里不存在）
+- 🐛 约 40 处边框渲染成 Tailwind preflight 的灰线 `#e5e7eb`
+- 🐛 创意软件 / 网络工具分类徽章**从来没有颜色**（violet/blue 类全缺）
+- 🐛 sticky 表头不生效（挂在 `tr` 上且表格是 `border-collapse`）
+- 🐛 arctic 亮底主题下终端、滚动条、CRT 扫描线仍是深绿（颜色全硬编码）
+- 🐛 `.retro-border:hover` 在任何主题下都闪回 Emerald 配色
+- 🐛 `[v-cloak]` 规则缺失，首帧会闪 `{{ }}` 原文
+- 🐛 超长进程名顶出操作按钮（`min-w-0` 缺失导致 truncate 失效）
+- 🐛 删除死代码 `.glow-led`（无 background，光晕从来不可见）与 `.spin-refresh`（零调用）
+
+**验证:**
+- ✅ `tests/verify_ui.py` —— 分阶段 Playwright 断言：7 主题 × 3 标签页截图、
+  零灰边框、tone 分色、对比度审计、sticky 表头、高度链、CRT 契约、
+  对话框键盘契约，以及把原生弹窗打桩为 throw 以证明零残留
 
 ### v2026.07-3 — 设置面板 UI 重设 + 主题卡紧凑化
 

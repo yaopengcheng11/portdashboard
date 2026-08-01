@@ -1222,11 +1222,13 @@ def serve_dashboard():
 
 ALLOWED_THEMES = {"dark-emerald", "blueprint", "midnight", "arctic", "terra", "neon", "velvet"}
 ALLOWED_CATEGORIES = {"all", "user", "creative"}
+ALLOWED_TABS = {"managed", "local", "system"}
 ALLOWED_REFRESH_INTERVALS = (3, 5, 10, 15, 30, 60)
 
 DEFAULT_PREFERENCES = {
     "theme": "dark-emerald",
     "default_category": "user",
+    "default_tab": "managed",
     "auto_refresh": True,
     "refresh_interval": 5,         # seconds
     "port": DEFAULT_PORT,          # binding port; takes effect after restart
@@ -1246,6 +1248,8 @@ def _coerce_preferences(raw: dict) -> dict:
         out["theme"] = raw["theme"]
     if raw.get("default_category") in ALLOWED_CATEGORIES:
         out["default_category"] = raw["default_category"]
+    if raw.get("default_tab") in ALLOWED_TABS:
+        out["default_tab"] = raw["default_tab"]
     if isinstance(raw.get("auto_refresh"), bool):
         out["auto_refresh"] = raw["auto_refresh"]
     try:
@@ -1313,6 +1317,7 @@ def get_preferences():
         "allowed": {
             "themes": sorted(ALLOWED_THEMES),
             "categories": sorted(ALLOWED_CATEGORIES),
+            "tabs": sorted(ALLOWED_TABS),
             "refresh_intervals": list(ALLOWED_REFRESH_INTERVALS),
         },
     }

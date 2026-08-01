@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# UI 验证脚手架（tests/verify_ui.py）用，运行服务本身不需要
+pytest>=8.0
+playwright>=1.40
+pillow>=10.0
+numpy>=1.26

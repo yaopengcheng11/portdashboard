@@ -1,13 +1,211 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="h-full">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PORT DASHBOARD - 本地网页与应用端口控制中心</title>
+<style id="pd-tokens">
+/* ==========================================================================
+   DESIGN TOKENS — 全站共享
+   建立在设置面板已验证的 --st-* 体系之上，只做增量扩展。
+   规则：组件永远不直接写颜色，只声明 tone；tone 的取值在这里逐主题校准。
+   ========================================================================== */
+
+/* DESIGN.md 一直要求 JetBrains Mono，但此前既无 @font-face 也无字体文件，
+   全站静默回退到系统等宽。latin 子集，本地托管，无 CDN 依赖。 */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/static/fonts/jetbrains-mono-latin-700-normal.woff2") format("woff2");
+}
+
+:root {
+  /* 深度层级。DESIGN.md v1 禁用阴影，v2 改为两级阴影 + glow（见 DESIGN.md 废弃对照表） */
+  --st-shadow-sm: 0 1px 2px rgba(0,0,0,.20), 0 4px 12px -6px rgba(0,0,0,.28);
+  --st-glow:      0 0 18px -2px color-mix(in srgb, var(--accent) 45%, transparent);
+
+  /* 终端输出区底色。原来硬编码 #010a0a，arctic 亮底主题下是脏的近黑绿 */
+  --st-term-bg: #010a0a;
+  --st-term-fg: #34d399;
+
+  /* 效果层强度，逐主题覆写 */
+  --crt-opacity:   .45;
+  --crt-stripe:    rgba(0,0,0,.25);
+  --crt-blend:     normal;
+  --noise-opacity: .065;
+  --noise-blend:   overlay;
+
+  /* 滚动条 */
+  --st-track: color-mix(in srgb, var(--midground) 6%, transparent);
+  --st-thumb: color-mix(in srgb, var(--midground) 26%, transparent);
+  --st-thumb-hover: color-mix(in srgb, var(--midground) 44%, transparent);
+
+  /* 层级。设置弹窗是 50，对话框与 toast 必须在它之上 */
+  --z-panel:  10;
+  --z-modal:  50;
+  --z-dialog: 60;
+  --z-toast:  70;
+  --z-noise:  9999;
+  --z-crt:    99999;
+
+  /* ---- 8 个语义 tone ----------------------------------------------------
+     ok=进程健康/HTTP/我的应用  info=外部占用  warn=需确认  danger=禁止/失败
+     self=面板自身端口  creative=创意软件  network=网络工具  muted=已停止/系统服务 */
+  --tone-ok:       #10b981;
+  --tone-info:     #0ea5e9;
+  --tone-warn:     #f59e0b;
+  --tone-danger:   #f43f5e;
+  --tone-self:     #06b6d4;
+  --tone-creative: #8b5cf6;
+  --tone-network:  #3b82f6;
+  --tone-muted:    #8d857c;
+  /* 叠在实心 tone 填充上的文字色（深色主题下统一用近黑） */
+  --tone-fg: #08110d;
+}
+
+/* arctic 是唯一亮底主题：tone 既要当浅底上的文字色，就必须压暗 */
+body[data-theme="arctic"] {
+  --tone-ok:       #047857;
+  --tone-info:     #0369a1;
+  --tone-warn:     #b45309;
+  --tone-danger:   #be123c;
+  --tone-self:     #0e7490;
+  --tone-creative: #6d28d9;
+  --tone-network:  #1d4ed8;
+  --tone-muted:    #57534e;
+  --tone-fg: #ffffff;
+
+  --st-term-bg: #f8fafc;
+  --st-term-fg: #0f766e;
+
+  /* 深色扫描线叠在白底上会发灰脏 —— 降强度并改 multiply */
+  --crt-opacity:   .16;
+  --crt-stripe:    rgba(51,65,85,.14);
+  --crt-blend:     multiply;
+  --noise-opacity: .035;
+  --noise-blend:   multiply;
+
+  --st-shadow-sm: 0 1px 2px rgba(15,23,42,.10), 0 4px 12px -6px rgba(15,23,42,.16);
+}
+
+/* neon 全站单色绿，tone 也收进绿/黄谱系，否则彩色徽章会破坏主题identity */
+body[data-theme="neon"] {
+  --tone-ok:       #00ff41;
+  --tone-info:     #00e5ff;
+  --tone-warn:     #ffd400;
+  --tone-danger:   #ff3b3b;
+  --tone-self:     #00ffc8;
+  --tone-creative: #b96bff;
+  --tone-network:  #4d9fff;
+  --tone-muted:    #4d7a55;
+  --tone-fg: #001a06;
+  --st-term-bg: #000000;
+  --st-term-fg: #00ff41;
+  --crt-opacity: .55;
+}
+
+body[data-theme="terra"]  { --tone-fg: #140c07; --st-term-bg: #120b07; --st-term-fg: #e8a87c; }
+body[data-theme="velvet"] { --tone-fg: #14090f; --st-term-bg: #120c14; --st-term-fg: #f0a8c8; }
+body[data-theme="blueprint"] { --st-term-bg: #061321; --st-term-fg: #7dd3fc; }
+body[data-theme="midnight"]  { --st-term-bg: #0a0c14; --st-term-fg: #a5b4fc; }
+</style>
 <style>
-/* ===== Settings 弹窗专属样式(主题感知) ===== */
+/* ==========================================================================
+   SETTINGS PANEL — 自包含样式表
+   与 pd-* 共用 --st-* token 层。选择器一律 .settings-* 前缀，
+   唯一例外是 body.crt-disabled —— CRT 开关的实现载体。
+   ========================================================================== */
+
+/* ---------- 1. Token 层 -------------------------------------------------- */
+:root {
+  /* 8px 基准间距刻度 */
+  --st-1: 4px;  --st-2: 8px;  --st-3: 12px; --st-4: 16px;
+  --st-5: 20px; --st-6: 24px; --st-7: 28px;
+
+  /* 圆角层级：容器 > 卡片 > 控件 > 微件 */
+  --st-r-modal: 16px; --st-r-lg: 12px; --st-r-md: 10px;
+  --st-r-sm: 8px;     --st-r-xs: 6px;  --st-r-pill: 999px;
+
+  /* 三级表面。两个操作数都不透明，避免混出半透明表面漏出 ambient-glow */
+  --st-surface:   var(--card-bg);
+  --st-surface-2: color-mix(in srgb, var(--card-bg) 90%, var(--midground));
+  --st-surface-3: color-mix(in srgb, var(--card-bg) 82%, var(--midground));
+
+  /* 三级分隔线，全部由 --midground 推导 */
+  --st-line:        color-mix(in srgb, var(--midground) 14%, transparent);
+  --st-line-soft:   color-mix(in srgb, var(--midground) 8%,  transparent);
+  --st-line-strong: color-mix(in srgb, var(--midground) 26%, transparent);
+
+  /* 文字三级 */
+  --st-fg:   var(--midground);
+  --st-fg-2: var(--dimmed);
+  --st-fg-3: color-mix(in srgb, var(--dimmed) 82%, transparent);
+
+  /* 强调色。--st-accent-fg 是"叠在 accent 上的文字色" */
+  --st-accent:      var(--accent);
+  --st-accent-fg:   #06131b;
+  --st-accent-weak: color-mix(in srgb, var(--accent) 12%, transparent);
+  --st-accent-soft: color-mix(in srgb, var(--accent) 22%, transparent);
+  --st-ring:        color-mix(in srgb, var(--accent) 45%, transparent);
+
+  --st-danger:    #f87171;
+  --st-danger-fg: #2a0a0a;
+
+  --st-scrim:  radial-gradient(ellipse at center, rgba(0,0,0,.50), rgba(0,0,0,.82));
+  --st-shadow: 0 28px 70px -18px rgba(0,0,0,.70), 0 8px 24px -12px rgba(0,0,0,.50);
+
+  --st-ease: cubic-bezier(.2,.7,.3,1);
+}
+
+/* ---------- 2. 逐主题对比度修正 ------------------------------------------
+   只覆写 --st-*，绝不触碰 --background / --midground / --accent 等主题原变量。 */
+body[data-theme="dark-emerald"] { --st-accent-fg: #041c1c; }
+body[data-theme="blueprint"]    { --st-accent-fg: #071a2e; }
+body[data-theme="midnight"]     { --st-accent-fg: #0c0f1a; }
+body[data-theme="terra"]        { --st-accent-fg: #0d0906; }
+body[data-theme="velvet"]       { --st-accent-fg: #1a1016; }
+/* neon: #0a0a0a 与 #00ff41 混色会发绿，表面改用中性灰 */
+body[data-theme="neon"] {
+  --st-accent-fg: #001a06;
+  --st-surface-2: #101010;
+  --st-surface-3: #161616;
+}
+/* arctic 是唯一亮底主题：#0d9488 配白字仅 3.98:1，压暗到 #0f766e 得 5.5:1 */
+body[data-theme="arctic"] {
+  --st-accent:      #0f766e;
+  --st-accent-fg:   #ffffff;
+  --st-accent-weak: color-mix(in srgb, #0f766e 10%, transparent);
+  --st-accent-soft: color-mix(in srgb, #0f766e 18%, transparent);
+  --st-ring:        color-mix(in srgb, #0f766e 40%, transparent);
+  --st-danger:      #dc2626;
+  --st-danger-fg:   #ffffff;
+  --st-surface-2:   #f7f9fc;
+  --st-surface-3:   #eef2f7;
+  --st-line:        color-mix(in srgb, var(--midground) 12%, transparent);
+  --st-line-strong: color-mix(in srgb, var(--midground) 22%, transparent);
+  --st-scrim:  radial-gradient(ellipse at center, rgba(15,23,42,.34), rgba(15,23,42,.60));
+  --st-shadow: 0 24px 60px -20px rgba(15,23,42,.34), 0 6px 18px -10px rgba(15,23,42,.20);
+}
+
+/* ---------- 3. 遮罩与容器 ------------------------------------------------ */
 .settings-backdrop {
-  background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), rgba(0,0,0,0.85));
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--st-4);
+  background: var(--st-scrim);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   animation: settings-fade-in .15s ease-out;
@@ -15,288 +213,1407 @@
 @keyframes settings-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .settings-modal {
-  animation: settings-pop-in .2s cubic-bezier(.2,.9,.3,1.2);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 820px;
+  height: min(84vh, 680px);
+  overflow: hidden;
+  background: var(--st-surface);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-modal);
+  box-shadow: var(--st-shadow);
+  color: var(--st-fg);
+  font-family: var(--font-mono);
+  animation: settings-pop-in .2s var(--st-ease);
 }
 @keyframes settings-pop-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
   to   { opacity: 1; transform: translateY(0)   scale(1); }
 }
+.settings-modal svg { flex: 0 0 auto; }
+
+/* ---------- 4. Header --------------------------------------------------- */
+.settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--st-4);
+  flex: 0 0 auto;
+  padding: var(--st-5) var(--st-6) var(--st-4);
+  background: var(--st-surface-2);
+  border-bottom: 1px solid var(--st-line);
+}
+.settings-header-left    { display: flex; align-items: flex-start; gap: var(--st-3); min-width: 0; }
+.settings-header-titles  { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.settings-header-actions { display: flex; align-items: center; gap: var(--st-3); flex: 0 0 auto; }
 
 .settings-header-icon {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--glow-color) 90%, transparent), color-mix(in srgb, var(--glow-color) 40%, transparent));
-  color: var(--midground);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glow-color) 60%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  flex: 0 0 auto;
+  border-radius: var(--st-r-lg);
+  background: linear-gradient(135deg,
+              color-mix(in srgb, var(--st-accent) 30%, var(--st-surface)),
+              color-mix(in srgb, var(--st-accent) 12%, var(--st-surface)));
+  color: var(--st-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-accent) 34%, transparent);
 }
+.settings-header-icon svg { width: 20px; height: 20px; }
+
 .settings-eyebrow {
-  color: color-mix(in srgb, var(--midground) 55%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--st-fg-3);
 }
+.settings-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -.01em;
+  color: var(--st-fg);
+}
+.settings-subtitle {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--st-fg-3);
+}
+
 .settings-current-chip {
-  background: color-mix(in srgb, var(--card-border) 60%, transparent);
-  color: var(--midground);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--st-2);
+  padding: 5px 10px;
+  border-radius: var(--st-r-pill);
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--st-surface-3);
+  border: 1px solid var(--st-line);
+  color: var(--st-fg);
 }
+.settings-chip-dot {
+  width: 6px; height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
 .settings-close-btn {
-  background: transparent;
-  color: color-mix(in srgb, var(--midground) 65%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: var(--st-r-sm);
   border: 1px solid transparent;
+  background: transparent;
+  color: var(--st-fg-2);
+  cursor: pointer;
+  transition: background .15s var(--st-ease), color .15s var(--st-ease),
+              border-color .15s var(--st-ease);
 }
+.settings-close-btn svg { width: 16px; height: 16px; }
 .settings-close-btn:hover {
-  background: color-mix(in srgb, var(--card-border) 80%, transparent);
-  color: var(--midground);
-  border-color: color-mix(in srgb, var(--card-border) 100%, transparent);
+  background: var(--st-surface-3);
+  border-color: var(--st-line-strong);
+  color: var(--st-fg);
+}
+.settings-close-btn:active { transform: scale(.94); }
+
+/* ---------- 5. Body / Sidebar ------------------------------------------- */
+/* min-height:0 是内部滚动能生效的关键（原先依赖的 Tailwind min-h-0 已缺失） */
+.settings-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .settings-sidebar {
-  width: 168px;
-  background: color-mix(in srgb, var(--card-bg) 75%, var(--glow-color));
-  border-right: 1px solid var(--card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 172px;
+  flex: 0 0 172px;
+  min-height: 0;
+  padding: var(--st-3) var(--st-2);
+  overflow-y: auto;
+  background: var(--st-surface-2);
+  border-right: 1px solid var(--st-line);
 }
+
 .settings-nav-item {
-  color: color-mix(in srgb, var(--midground) 60%, transparent);
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--st-3);
+  width: 100%;
+  padding: 9px 10px 9px 14px;
+  border: 0;
+  border-radius: var(--st-r-sm);
+  background: transparent;
+  color: var(--st-fg-2);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s var(--st-ease), color .15s var(--st-ease);
 }
-.settings-nav-item:hover {
-  background: color-mix(in srgb, var(--card-border) 50%, transparent);
-  color: var(--midground);
-}
+.settings-nav-item:hover { background: var(--st-surface-3); color: var(--st-fg); }
 .settings-nav-item.is-active {
-  background: color-mix(in srgb, var(--glow-color) 35%, transparent);
-  color: var(--midground);
+  background: var(--st-accent-soft);
+  color: var(--st-fg);
 }
 .settings-nav-bar {
   position: absolute;
-  left: 0; top: 8px; bottom: 8px;
+  left: 0; top: 7px; bottom: 7px;
   width: 3px;
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 3px 3px 0;
   background: transparent;
-  transition: background .15s;
+  transition: background .15s var(--st-ease);
 }
 .settings-nav-item.is-active .settings-nav-bar {
-  background: var(--glow-color);
-  box-shadow: 0 0 6px var(--glow-color);
+  background: var(--st-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--st-accent) 70%, transparent);
 }
-.settings-nav-item.is-active svg { color: var(--midground); }
+.settings-nav-icon { width: 16px; height: 16px; }
+.settings-nav-item.is-active .settings-nav-icon { color: var(--st-accent); }
+.settings-nav-text  { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
+.settings-nav-label {
+  font-size: 12.5px; font-weight: 600; line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.settings-nav-sub {
+  font-size: 8.5px; letter-spacing: .15em; text-transform: uppercase;
+  line-height: 1.3; color: var(--st-fg-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.settings-nav-item.is-active .settings-nav-sub {
+  color: color-mix(in srgb, var(--st-accent) 90%, var(--st-fg));
+}
 
+/* ---------- 6. Content -------------------------------------------------- */
 .settings-content {
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--card-bg) 100%, transparent),
-    color-mix(in srgb, var(--card-bg) 95%, var(--glow-color)));
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--st-6) var(--st-7) var(--st-7);
+  background: var(--st-surface);
 }
-.settings-section-head { margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px dashed var(--card-border); }
+/* 全局滚动条硬编码了深色轨道，这里就地覆盖，arctic 下才不突兀 */
+.settings-content::-webkit-scrollbar       { width: 8px; }
+.settings-content::-webkit-scrollbar-track { background: transparent; }
+.settings-content::-webkit-scrollbar-thumb {
+  border-radius: var(--st-r-pill);
+  background: color-mix(in srgb, var(--st-fg) 22%, transparent);
+}
+.settings-content::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--st-fg) 38%, transparent);
+}
+.settings-sidebar::-webkit-scrollbar { width: 0; }
+
+.settings-section { animation: settings-section-in .18s var(--st-ease); }
+@keyframes settings-section-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.settings-section-head {
+  margin: 0 0 var(--st-5);
+  padding-bottom: var(--st-4);
+  border-bottom: 1px solid var(--st-line);
+}
 .settings-h1 {
-  font-size: 20px; font-weight: 700; margin-top: 4px;
-  color: var(--midground); letter-spacing: -0.01em;
+  margin: var(--st-1) 0 0;
+  font-size: 19px; font-weight: 700; line-height: 1.25;
+  letter-spacing: -.01em;
+  color: var(--st-fg);
 }
 .settings-hint {
-  font-size: 11px; margin-top: 6px; line-height: 1.5;
-  color: color-mix(in srgb, var(--midground) 55%, transparent);
+  margin: 6px 0 0;
+  font-size: 11.5px; line-height: 1.6;
+  color: var(--st-fg-2);
 }
 
-/* 紧凑横向主题行:左侧 swatch 圆点 + 中间双行文字 + 右侧对勾 */
+/* ---------- 7. 主题选择 -------------------------------------------------- */
+.settings-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--st-2);
+}
 .settings-theme-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 8px;
+  gap: var(--st-3);
+  width: 100%;
+  padding: 10px var(--st-3);
+  border-radius: var(--st-r-md);
+  border: 1px solid var(--st-line);
+  background: var(--st-surface-3);
+  color: var(--st-fg);
+  font-family: inherit;
+  text-align: left;
   cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--card-border) 50%, transparent);
-  background: color-mix(in srgb, var(--card-border) 25%, transparent);
-  transition: all .15s;
+  transition: border-color .15s var(--st-ease), background .15s var(--st-ease),
+              transform .15s var(--st-ease);
 }
 .settings-theme-row:hover {
-  border-color: color-mix(in srgb, var(--glow-color) 70%, transparent);
-  background: color-mix(in srgb, var(--glow-color) 15%, transparent);
-  transform: translateX(2px);
+  border-color: color-mix(in srgb, var(--st-accent) 60%, transparent);
+  background: var(--st-accent-weak);
+  transform: translateY(-1px);
 }
 .settings-theme-row.is-active {
-  border-color: var(--glow-color);
-  background: color-mix(in srgb, var(--glow-color) 25%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glow-color) 60%, transparent);
+  border-color: var(--st-accent);
+  background: var(--st-accent-weak);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-accent) 45%, transparent);
 }
+/* swatch 同时展示主题底色(t.bg)与强调色(t.swatch) */
 .settings-theme-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  border: 1px solid rgba(255,255,255,0.15);
-}
-.settings-theme-info {
-  flex: 1;
-  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  justify-content: center;
+  width: 20px; height: 20px;
+  flex: 0 0 auto;
+  border-radius: var(--st-r-xs);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-fg) 22%, transparent);
 }
+.settings-theme-swatch-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+.settings-theme-info  { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
 .settings-theme-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--midground);
-  letter-spacing: -0.01em;
-  line-height: 1.2;
+  font-size: 12px; font-weight: 600; line-height: 1.25;
+  letter-spacing: -.01em; color: var(--st-fg);
 }
-.settings-theme-desc {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--midground) 55%, transparent);
-  line-height: 1.2;
-}
-.settings-theme-row .settings-theme-check {
-  width: 14px;
-  height: 14px;
-  color: var(--midground);
-  flex-shrink: 0;
-}
+.settings-theme-desc  { font-size: 10px; line-height: 1.3; color: var(--st-fg-2); }
+.settings-theme-check { width: 14px; height: 14px; color: var(--st-accent); }
 
+/* ---------- 8. 设置行 ---------------------------------------------------- */
 .settings-row {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 14px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--card-border) 60%, transparent);
+  gap: var(--st-4);
+  padding: var(--st-4) 0;
+  border-bottom: 1px solid var(--st-line-soft);
 }
-.settings-row:last-child { border-bottom: none; }
-.settings-row.is-disabled { opacity: 0.4; pointer-events: none; }
-.settings-row-main { flex: 1; min-width: 0; }
-.settings-row-title {
-  font-size: 13px; font-weight: 600;
-  color: var(--midground);
-}
-.settings-row-desc {
-  font-size: 10.5px; margin-top: 3px; line-height: 1.5;
-  color: color-mix(in srgb, var(--midground) 55%, transparent);
-}
+.settings-row:first-child { padding-top: 0; }
+.settings-row:last-child  { border-bottom: none; padding-bottom: 0; }
+.settings-row.is-disabled { opacity: .45; pointer-events: none; }
+.settings-row-main  { flex: 1 1 auto; min-width: 0; }
+.settings-row-title { font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--st-fg); }
+.settings-row-desc  { margin-top: 3px; font-size: 11px; line-height: 1.5; color: var(--st-fg-2); }
 
+/* ---------- 9. 开关 ------------------------------------------------------ */
 .settings-toggle {
   position: relative;
   display: inline-block;
-  width: 38px; height: 22px;
-  flex-shrink: 0;
+  width: 40px; height: 22px;
+  flex: 0 0 auto;
   cursor: pointer;
 }
 .settings-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
 .settings-toggle-track {
   position: absolute; inset: 0;
-  background: color-mix(in srgb, var(--card-border) 100%, transparent);
-  border-radius: 11px;
-  transition: background .2s;
+  border-radius: var(--st-r-pill);
+  background: var(--st-surface-3);
+  box-shadow: inset 0 0 0 1px var(--st-line-strong);
+  transition: background .2s var(--st-ease), box-shadow .2s var(--st-ease);
 }
 .settings-toggle-thumb {
   position: absolute;
   top: 3px; left: 3px;
   width: 16px; height: 16px;
-  background: var(--midground);
   border-radius: 50%;
-  transition: transform .2s, background .2s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  background: var(--st-fg-2);
+  box-shadow: 0 1px 3px rgba(0,0,0,.35);
+  transition: transform .2s var(--st-ease), background .2s var(--st-ease);
 }
 .settings-toggle input:checked + .settings-toggle-track {
-  background: var(--glow-color);
+  background: var(--st-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-accent) 80%, transparent);
 }
 .settings-toggle input:checked + .settings-toggle-track .settings-toggle-thumb {
-  transform: translateX(16px);
-  background: #041c1c;
+  transform: translateX(18px);
+  background: var(--st-accent-fg);
+}
+.settings-toggle input:focus-visible + .settings-toggle-track {
+  box-shadow: 0 0 0 3px var(--st-ring);
 }
 
+/* ---------- 10. 分段控件 ------------------------------------------------- */
 .settings-segmented {
   display: inline-flex;
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
+  flex: 0 0 auto;
   overflow: hidden;
-  background: color-mix(in srgb, var(--card-border) 30%, transparent);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-md);
+  background: var(--st-surface-3);
 }
 .settings-segmented button {
-  padding: 6px 12px;
-  font-size: 11px; font-family: var(--font-mono);
-  color: color-mix(in srgb, var(--midground) 65%, transparent);
+  padding: 7px 12px;
+  border: 0;
+  border-right: 1px solid var(--st-line);
   background: transparent;
-  border: none;
+  color: var(--st-fg-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
   cursor: pointer;
-  transition: all .15s;
-  border-right: 1px solid var(--card-border);
+  transition: background .15s var(--st-ease), color .15s var(--st-ease);
 }
 .settings-segmented button:last-child { border-right: none; }
-.settings-segmented button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--card-border) 50%, transparent);
-  color: var(--midground);
+.settings-segmented button:hover:not(:disabled):not(.is-active) {
+  background: var(--st-accent-weak);
+  color: var(--st-fg);
 }
 .settings-segmented button.is-active {
-  background: var(--glow-color);
-  color: #041c1c;
+  background: var(--st-accent);
+  color: var(--st-accent-fg);
   font-weight: 700;
 }
-.settings-segmented button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
+.settings-segmented button:disabled { cursor: not-allowed; opacity: .5; }
+
+/* ---------- 11. 输入 ----------------------------------------------------- */
+.settings-field      { display: flex; flex-direction: column; align-items: flex-end; gap: var(--st-1); flex: 0 0 auto; }
+.settings-field-note { font-size: 9.5px; line-height: 1.3; color: var(--st-fg-3); }
 
 .settings-input {
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--card-border);
-  background: color-mix(in srgb, var(--card-border) 30%, transparent);
-  color: var(--midground);
+  padding: 7px 10px;
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-sm);
+  background: var(--st-surface-3);
+  color: var(--st-fg);
   font-family: var(--font-mono);
   font-size: 12px;
+  transition: border-color .15s var(--st-ease), box-shadow .15s var(--st-ease);
 }
+.settings-input.is-port { width: 96px; text-align: right; }
 .settings-input:focus {
   outline: none;
-  border-color: var(--glow-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--glow-color) 30%, transparent);
+  border-color: var(--st-accent);
+  box-shadow: 0 0 0 3px var(--st-ring);
 }
 
+/* ---------- 12. 信息卡 --------------------------------------------------- */
 .settings-info-card {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--card-border) 40%, transparent);
-  border-left: 2px solid var(--glow-color);
-  color: color-mix(in srgb, var(--midground) 70%, transparent);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--st-2);
+  margin-top: var(--st-5);
+  padding: var(--st-3) var(--st-3) var(--st-3) 14px;
+  border-radius: var(--st-r-md);
+  border-left: 2px solid var(--st-accent);
+  background: var(--st-surface-3);
+  color: var(--st-fg-2);
   font-size: 11px;
+  line-height: 1.65;
 }
+.settings-info-card svg { width: 14px; height: 14px; margin-top: 2px; color: var(--st-accent); }
+.settings-info-card.is-warn {
+  border-left-color: var(--st-danger);
+  color: var(--st-fg);
+}
+.settings-info-card.is-warn svg { color: var(--st-danger); }
 
+/* ---------- 13. Footer -------------------------------------------------- */
 .settings-footer {
-  background: color-mix(in srgb, var(--card-bg) 75%, var(--glow-color));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--st-4);
+  flex: 0 0 auto;
+  padding: var(--st-3) var(--st-6);
+  background: var(--st-surface-2);
+  border-top: 1px solid var(--st-line);
+}
+.settings-footer-note {
+  display: flex; align-items: center; gap: var(--st-2);
+  font-size: 10px; color: var(--st-fg-3);
+}
+.settings-footer-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 6px #34d399;
+}
+.settings-footer-actions { display: flex; align-items: center; gap: var(--st-2); }
+
+/* ---------- 14. 按钮 ----------------------------------------------------- */
+.settings-btn-primary,
+.settings-btn-ghost,
+.settings-btn-danger {
+  padding: 8px 16px;
+  flex: 0 0 auto;
+  border-radius: var(--st-r-sm);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background .15s var(--st-ease), color .15s var(--st-ease),
+              border-color .15s var(--st-ease), transform .12s var(--st-ease);
 }
 .settings-btn-primary {
-  padding: 6px 14px;
-  border-radius: 6px;
-  background: var(--glow-color);
-  color: #041c1c;
+  border: 1px solid var(--st-accent);
+  background: var(--st-accent);
+  color: var(--st-accent-fg);
   font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  border: none;
-  cursor: pointer;
-  transition: all .15s;
+  letter-spacing: .04em;
 }
-.settings-btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.settings-btn-primary:hover  { filter: brightness(1.08); transform: translateY(-1px); }
+.settings-btn-primary:active { transform: translateY(0); filter: brightness(.96); }
+
 .settings-btn-ghost {
-  padding: 6px 14px;
-  border-radius: 6px;
+  border: 1px solid var(--st-line-strong);
   background: transparent;
-  color: color-mix(in srgb, var(--midground) 70%, transparent);
-  font-size: 11px;
-  border: 1px solid var(--card-border);
-  cursor: pointer;
-  transition: all .15s;
+  color: var(--st-fg-2);
 }
-.settings-btn-ghost:hover {
-  background: color-mix(in srgb, var(--card-border) 60%, transparent);
-  color: var(--midground);
-}
+.settings-btn-ghost:hover { background: var(--st-surface-3); color: var(--st-fg); }
+
 .settings-btn-danger {
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--st-danger);
   background: transparent;
-  color: #f87171;
-  font-size: 11px;
+  color: var(--st-danger);
   font-weight: 600;
-  border: 1px solid #f87171;
-  cursor: pointer;
-  transition: all .15s;
 }
-.settings-btn-danger:hover { background: #f87171; color: #041c1c; }
+.settings-btn-danger:hover {
+  background: var(--st-danger);
+  color: var(--st-danger-fg);
+}
+
+.settings-modal button:focus-visible,
+.settings-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--st-ring);
+}
+
+/* ---------- 15. 主页入口按钮 --------------------------------------------- */
+.settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--st-2);
+  align-self: flex-start;
+  padding: 8px var(--st-3);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-md);
+  background: var(--st-surface-2);
+  color: var(--st-fg);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: border-color .2s var(--st-ease), background .2s var(--st-ease);
+}
+.settings-trigger:hover {
+  border-color: var(--st-accent);
+  background: var(--st-accent-weak);
+}
+.settings-trigger svg { width: 16px; height: 16px; color: var(--st-accent); transition: transform .3s var(--st-ease); }
+.settings-trigger:hover svg { transform: rotate(45deg); }
+.settings-trigger-label { font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+.settings-trigger-kbd {
+  padding: 2px 6px;
+  border: 1px solid var(--st-line);
+  border-radius: var(--st-r-xs);
+  font-size: 9px;
+  color: var(--st-fg-3);
+  opacity: 0;
+  transition: opacity .2s var(--st-ease);
+}
+.settings-trigger:hover .settings-trigger-kbd { opacity: 1; }
+
+/* ---------- 16. CRT 开关的实现 ------------------------------------------
+   JS 一直在 toggle 这个 class，但此前没有任何规则，开关因此完全无效。
+   .crt-overlay::after 特异度 (0,1,1) 且定义在后一个 <style> 里，
+   这里用双类选择器 (0,2,1) 保证无论源序都能压制。                      */
+body.crt-disabled.crt-overlay::after {
+  content: none;
+  display: none;
+}
+
+/* ---------- 17. 窄屏兜底（自写 @media，md:/lg: 变体在裁剪版里不存在） --- */
+@media (max-width: 720px) {
+  .settings-modal    { height: min(92vh, 720px); max-width: 100%; }
+  .settings-body     { flex-direction: column; }
+  .settings-sidebar {
+    flex: 0 0 auto;
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--st-line);
+  }
+  .settings-nav-item   { width: auto; padding: 8px 12px; }
+  .settings-nav-bar    { top: auto; bottom: 0; left: 6px; right: 6px; width: auto; height: 2px; border-radius: 2px 2px 0 0; }
+  .settings-nav-sub    { display: none; }
+  .settings-content    { padding: var(--st-5) var(--st-4) var(--st-6); }
+  .settings-theme-grid { grid-template-columns: 1fr; }
+  .settings-row        { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-backdrop, .settings-modal, .settings-section { animation: none; }
+  .settings-modal *, .settings-trigger, .settings-trigger svg { transition: none !important; }
+}
 </style>
-  <!-- Tailwind CSS (local) -->
-  <link href="/static/tailwind.min.css" rel="stylesheet">
+<style id="pd-base">
+/* ==========================================================================
+   PREFLIGHT — 复刻页面实际依赖的那部分 Tailwind base reset
+   现在放在 Tailwind link 之前：冲突属性仍由 Tailwind 胜出，本块此刻等于惰性，
+   等 Tailwind 被移除后自动接管。差别只有一处：默认边框色取主题 token，
+   而不是 Tailwind preflight 的 #e5e7eb（那是全站约 40 条灰线的根源）。
+   ========================================================================== */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  border: 0 solid var(--st-line);
+}
+
+/* 原来靠 <html class="h-full"> 与 <body class="h-full"> 这两个 Tailwind 类 */
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background-color: var(--background);
+  color: var(--midground);
+  font-family: var(--font-sans);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Tailwind preflight 里的 svg{display:block}。缺了它每个图标行会多 3–4px 基线间隙 */
+img, svg, video, canvas { display: block; }
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+button { background: none; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+h1, h2, h3, h4, p, pre { margin: 0; }
+table { border-collapse: collapse; }
+
+/* 此前完全缺失，但 #app 上一直挂着 v-cloak —— 首帧会闪 {{ }} 原文 */
+[v-cloak] { display: none !important; }
+</style>
+<style id="pd-ui">
+/* ==========================================================================
+   COMPONENT LIBRARY — pd-*
+   与 settings-* 并存，共用 --st-* token，视觉自然一致。
+   约束：组件不写具体颜色，只消费 --tone / --tone-fg 与 --st-* token。
+   约束：不提供数值型间距 utility —— 间距归属于组件，避免重建一套 Tailwind。
+   ========================================================================== */
+
+/* ---------- 1. 动画 ------------------------------------------------------ */
+@keyframes pd-ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+@keyframes pd-spin { to { transform: rotate(360deg); } }
+@keyframes pd-pulse {
+  50% { opacity: .45; }
+}
+@keyframes pd-bounce {
+  0%, 100% { transform: translateY(-18%); animation-timing-function: cubic-bezier(.8,0,1,1); }
+  50%      { transform: none;             animation-timing-function: cubic-bezier(0,0,.2,1); }
+}
+@keyframes pd-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- 2. tone providers -------------------------------------------
+   组件只声明 data-tone，具体色值在这里解析。新增 tone 只需加一行。 */
+[data-tone="ok"]       { --tone: var(--tone-ok); }
+[data-tone="info"]     { --tone: var(--tone-info); }
+[data-tone="warn"]     { --tone: var(--tone-warn); }
+[data-tone="danger"]   { --tone: var(--tone-danger); }
+[data-tone="self"]     { --tone: var(--tone-self); }
+[data-tone="creative"] { --tone: var(--tone-creative); }
+[data-tone="network"]  { --tone: var(--tone-network); }
+[data-tone="muted"]    { --tone: var(--tone-muted); }
+[data-tone="accent"]   { --tone: var(--st-accent); --tone-fg: var(--st-accent-fg); }
+/* 未声明 tone 时退化为强调色。必须用 :where() 把特异度归零 ——
+   否则它与 [data-tone] 同为 (0,1,0) 且写在后面，会反过来盖掉所有 tone。 */
+:where(.pd-card, .pd-badge, .pd-pill, .pd-btn, .pd-led, .pd-lock, .pd-toast, .pd-dialog) {
+  --tone: var(--st-accent);
+  --tone-fg: var(--st-accent-fg);
+}
+
+/* ---------- 3. 布局原语 -------------------------------------------------- */
+.pd-app {
+  position: relative;
+  z-index: var(--z-panel);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100vh;
+  padding: var(--st-4);
+  user-select: none;
+}
+@media (min-width: 768px) { .pd-app { padding: var(--st-6); } }
+
+/* 主内容 8/12 + 日志栏 4/12。<1280px 单列堆叠 */
+.pd-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--st-6);
+  overflow: hidden;
+}
+@media (min-width: 1280px) {
+  .pd-main { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .pd-col-main { grid-column: span 8; }
+  .pd-col-side { grid-column: span 4; }
+}
+
+/* 三段式高度收敛链。min-height:0 是整条链能收敛的关键 */
+.pd-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.pd-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--st-1);
+}
+.pd-scroll::-webkit-scrollbar { width: 8px; }
+.pd-scroll::-webkit-scrollbar-track { background: transparent; }
+.pd-scroll::-webkit-scrollbar-thumb {
+  border-radius: var(--st-r-pill);
+  background: var(--st-thumb);
+}
+.pd-scroll::-webkit-scrollbar-thumb:hover { background: var(--st-thumb-hover); }
+
+.pd-row        { display: flex; align-items: center; gap: var(--st-2); min-width: 0; }
+.pd-row--between { justify-content: space-between; }
+.pd-row--end     { justify-content: flex-end; }
+.pd-row--top     { align-items: flex-start; }
+.pd-row--wrap    { flex-wrap: wrap; }
+.pd-row--gap3  { gap: var(--st-3); }
+.pd-row--gap4  { gap: var(--st-4); }
+
+.pd-stack        { display: flex; flex-direction: column; gap: var(--st-4); min-width: 0; }
+.pd-stack--tight { gap: var(--st-2); }
+
+.pd-grow   { flex: 1 1 auto; min-width: 0; }
+.pd-spacer { flex: 1 1 auto; }   /* 原来是 hidden md:block flex-1，md:block 缺失导致永久隐藏 */
+
+.pd-truncate {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pd-clamp-2 {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pd-caps {
+  font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--st-fg-3);
+}
+.pd-mono { font-family: var(--font-mono); }
+.pd-hint { font-size: 11px; line-height: 1.6; color: var(--st-fg-2); }
+
+/* ---------- 4. 效果层 ---------------------------------------------------- */
+.pd-noise {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: var(--z-noise);
+  opacity: var(--noise-opacity);
+  mix-blend-mode: var(--noise-blend);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.pd-ambient {
+  position: fixed;
+  top: 10%; left: 50%;
+  transform: translateX(-50%);
+  width: 80vw; height: 40vh;
+  z-index: -1;
+  opacity: .6;
+  pointer-events: none;
+  /* 外圈原来硬编码 rgba(4,28,28,0)，在非 emerald 主题下会带绿 */
+  background: radial-gradient(circle,
+              var(--glow-color) 0%,
+              color-mix(in srgb, var(--background) 100%, transparent) 70%);
+}
+
+/* ---------- 5. 顶栏 ------------------------------------------------------ */
+.pd-header {
+  display: flex; flex-direction: column;
+  gap: var(--st-4);
+  flex: 0 0 auto;
+  padding-bottom: var(--st-4);
+  margin-bottom: var(--st-5);
+  border-bottom: 1px solid var(--st-line);
+}
+@media (min-width: 768px) {
+  .pd-header { flex-direction: row; align-items: center; }
+}
+
+.pd-brand { display: flex; align-items: center; gap: var(--st-3); flex: 0 0 auto; }
+.pd-brand__mark {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  width: 46px; height: 46px;
+  flex: 0 0 auto;
+  border: 2px solid var(--st-fg);
+  border-radius: var(--st-r-md);
+  box-shadow: var(--st-glow);
+  font-family: var(--font-mono);
+  font-size: 20px; font-weight: 700;
+  color: var(--st-fg);
+}
+.pd-brand__mark::before,
+.pd-brand__mark::after {
+  content: ""; position: absolute;
+  width: 6px; height: 6px;
+  background: var(--st-accent);
+}
+.pd-brand__mark::before { top: -3px; left: -3px; }
+.pd-brand__mark::after  { bottom: -3px; right: -3px; }
+.pd-brand__title {
+  font-family: var(--font-mono);
+  font-size: 22px; font-weight: 700; letter-spacing: .06em;
+  line-height: 1.2;
+  color: var(--st-fg);
+}
+.pd-brand__sub {
+  margin-top: 3px;
+  font-size: 11px; letter-spacing: .02em;
+  color: var(--st-fg-2);
+}
+
+.pd-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--st-3);
+  width: 100%;
+}
+@media (min-width: 768px) {
+  .pd-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); width: auto; }
+}
+.pd-metric {
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 3px;
+  padding: var(--st-2) var(--st-3);
+  border: 1px solid var(--st-line);
+  border-radius: var(--st-r-md);
+  background: var(--st-surface-2);
+  box-shadow: var(--st-shadow-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.pd-metric__label { color: var(--st-fg-3); font-size: 10px; }
+.pd-metric__value {
+  display: flex; align-items: center; gap: var(--st-1);
+  font-weight: 600; color: var(--st-accent);
+}
+.pd-metric__value svg { width: 12px; height: 12px; }
+.pd-metric__value--plain { color: var(--st-fg); }
+
+.pd-meter {
+  height: 5px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: var(--st-r-pill);
+  background: color-mix(in srgb, var(--midground) 12%, transparent);
+}
+.pd-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg,
+              color-mix(in srgb, var(--st-accent) 70%, transparent),
+              var(--st-accent));
+  transition: width .3s var(--st-ease);
+}
+
+/* ---------- 6. 标签页与安全锁 -------------------------------------------- */
+.pd-tabbar {
+  display: flex; flex-direction: column;
+  gap: var(--st-3);
+  flex: 0 0 auto;
+  padding-bottom: var(--st-3);
+  margin-bottom: var(--st-4);
+  border-bottom: 1px solid var(--st-line);
+}
+@media (min-width: 640px) {
+  .pd-tabbar { flex-direction: row; align-items: center; justify-content: space-between; }
+}
+.pd-tabs { display: flex; gap: var(--st-2); }
+.pd-tab {
+  padding: 8px var(--st-4);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-md);
+  background: transparent;
+  color: var(--st-fg-2);
+  font-family: var(--font-mono);
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  transition: background .15s var(--st-ease), color .15s var(--st-ease),
+              border-color .15s var(--st-ease);
+}
+.pd-tab:hover { background: var(--st-surface-3); color: var(--st-fg); }
+.pd-tab.is-active {
+  background: var(--st-accent);
+  border-color: var(--st-accent);
+  color: var(--st-accent-fg);
+  font-weight: 700;
+  box-shadow: var(--st-glow);
+}
+
+.pd-lock {
+  display: inline-flex; align-items: center; gap: var(--st-2);
+  padding: 6px var(--st-3);
+  border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
+  border-radius: var(--st-r-md);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  color: var(--tone);
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 700;
+}
+.pd-lock svg { width: 13px; height: 13px; }
+.pd-lock--open { box-shadow: 0 0 12px -2px color-mix(in srgb, var(--tone) 45%, transparent); }
+.pd-lock--open svg { animation: pd-bounce 1s infinite; }
+
+/* ---------- 7. 按钮 ------------------------------------------------------ */
+.pd-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--st-1);
+  flex: 0 0 auto;
+  padding: 7px var(--st-3);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-sm);
+  background: var(--st-surface-3);
+  color: var(--st-fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px; line-height: 1.2;
+  transition: background .15s var(--st-ease), color .15s var(--st-ease),
+              border-color .15s var(--st-ease), transform .12s var(--st-ease);
+}
+.pd-btn svg { width: 13px; height: 13px; }
+.pd-btn:hover:not(:disabled) { border-color: var(--st-line-strong); background: var(--st-surface-2); }
+.pd-btn:active:not(:disabled) { transform: translateY(1px); }
+.pd-btn:disabled { opacity: .4; }
+.pd-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--st-ring); }
+
+/* tone 变体：淡填充 + tone 描边 + tone 文字 */
+.pd-btn--tone {
+  border-color: color-mix(in srgb, var(--tone) 42%, transparent);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  color: var(--tone);
+}
+.pd-btn--tone:hover:not(:disabled) {
+  background: var(--tone);
+  border-color: var(--tone);
+  color: var(--tone-fg);
+}
+/* tone 实心：用于主行动（启动 / 关闭） */
+.pd-btn--solid {
+  border-color: var(--tone);
+  background: var(--tone);
+  color: var(--tone-fg);
+  font-weight: 700;
+}
+.pd-btn--solid:hover:not(:disabled) { filter: brightness(1.08); }
+.pd-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--st-fg-2);
+}
+.pd-btn--ghost:hover:not(:disabled) { background: var(--st-surface-3); color: var(--st-fg); }
+.pd-btn--icon { padding: 7px; }
+.pd-btn--icon svg { width: 14px; height: 14px; }
+.pd-btn--sm { padding: 5px var(--st-2); font-size: 11px; }
+.pd-btn--xs { padding: 3px var(--st-2); font-size: 10px; }
+.pd-btn--block { flex: 1 1 auto; }
+.pd-btn--spin svg { animation: pd-spin .8s linear infinite; }
+
+/* ---------- 8. 卡片 ------------------------------------------------------ */
+.pd-card {
+  position: relative;
+  display: flex; flex-direction: column;
+  gap: var(--st-3);
+  padding: var(--st-4);
+  overflow: hidden;
+  border: 1px solid var(--st-line);
+  border-radius: var(--st-r-lg);
+  background: var(--st-surface-2);
+  box-shadow: var(--st-shadow-sm);
+  transition: border-color .2s var(--st-ease), box-shadow .2s var(--st-ease);
+}
+/* hover 用 tone 而不是原先硬编码的奶油白 + 琥珀（那让任何主题都闪回 Emerald） */
+.pd-card:hover { border-color: color-mix(in srgb, var(--tone) 45%, transparent); }
+/* 左侧 tone 色轨表达状态，比整卡换色克制 */
+.pd-card--railed::before {
+  content: ""; position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--tone);
+  box-shadow: 0 0 10px -1px color-mix(in srgb, var(--tone) 70%, transparent);
+}
+.pd-card--railed { padding-left: calc(var(--st-4) + 3px); }
+.pd-card--active { box-shadow: var(--st-shadow-sm), var(--st-glow); }
+.pd-card__title {
+  font-family: var(--font-mono);
+  font-size: 15px; font-weight: 700; letter-spacing: .01em;
+  color: var(--st-fg);
+}
+.pd-card__desc {
+  font-size: 11px; line-height: 1.5;
+  color: var(--st-fg-2);
+  min-height: 2.6em;
+}
+.pd-card__foot {
+  display: flex; gap: var(--st-2); flex-wrap: wrap;
+  padding-top: var(--st-3);
+  border-top: 1px solid var(--st-line-soft);
+}
+.pd-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--st-4);
+  align-content: start;
+}
+
+/* LED 呼吸灯：外圈 ping + 内圈实心 */
+.pd-led {
+  position: relative;
+  display: inline-flex;
+  width: 10px; height: 10px;
+  flex: 0 0 auto;
+}
+.pd-led__ping, .pd-led__dot {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: var(--tone);
+}
+.pd-led__ping { opacity: .7; }
+.pd-led--live .pd-led__ping { animation: pd-ping 1.1s cubic-bezier(0,0,.2,1) infinite; }
+.pd-led--live .pd-led__dot  { box-shadow: 0 0 8px var(--tone); }
+
+/* CWD / CMD 代码块 */
+.pd-code {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: var(--st-2) var(--st-3);
+  border: 1px solid var(--st-line-soft);
+  border-radius: var(--st-r-sm);
+  background: color-mix(in srgb, var(--background) 70%, var(--card-bg));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--st-fg-2);
+}
+.pd-code__row { display: flex; align-items: baseline; gap: var(--st-1); min-width: 0; }
+.pd-code__key { flex: 0 0 auto; color: var(--st-accent); font-weight: 600; }
+.pd-code__meta {
+  display: flex; justify-content: space-between; gap: var(--st-2);
+  padding-top: 5px; margin-top: 2px;
+  border-top: 1px solid var(--st-line-soft);
+  font-size: 10px;
+}
+.pd-code__meta strong { color: var(--st-fg); font-weight: 600; }
+
+/* ---------- 9. 徽章与端口标签 -------------------------------------------- */
+.pd-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  flex: 0 0 auto;
+  padding: 3px var(--st-2);
+  border: 1px solid color-mix(in srgb, var(--tone) 38%, transparent);
+  border-radius: var(--st-r-xs);
+  background: color-mix(in srgb, var(--tone) 15%, transparent);
+  color: var(--tone);
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  white-space: nowrap;
+}
+.pd-badge--solid {
+  border-color: var(--tone);
+  background: var(--tone);
+  color: var(--tone-fg);
+}
+.pd-badge--caps { text-transform: uppercase; }
+
+.pd-port-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  flex: 0 0 auto;
+  padding: 3px var(--st-2);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-xs);
+  background: color-mix(in srgb, var(--background) 60%, var(--card-bg));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--st-fg-2);
+}
+.pd-port-tag strong { color: var(--st-accent); font-weight: 700; }
+.pd-port-num {
+  font-family: var(--font-mono);
+  font-size: 17px; font-weight: 700;
+  color: var(--st-accent);
+}
+
+/* ---------- 10. pill 过滤组 ---------------------------------------------- */
+.pd-pills {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-md);
+  background: color-mix(in srgb, var(--background) 55%, var(--card-bg));
+}
+.pd-pill {
+  padding: 4px var(--st-2);
+  border: 0;
+  border-radius: var(--st-r-xs);
+  background: transparent;
+  color: color-mix(in srgb, var(--tone) 78%, var(--st-fg-3));
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  transition: background .15s var(--st-ease), color .15s var(--st-ease);
+}
+.pd-pill:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  color: var(--tone);
+}
+.pd-pill.is-active {
+  background: var(--tone);
+  color: var(--tone-fg);
+  font-weight: 700;
+}
+
+/* ---------- 11. 空状态 --------------------------------------------------- */
+.pd-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: var(--st-2);
+  min-height: 16rem;             /* 原来靠 h-64，该类缺失 → 空态不居中 */
+  padding: var(--st-6);
+  border: 1px dashed var(--st-line);
+  border-radius: var(--st-r-lg);
+  text-align: center;
+  color: var(--st-fg-2);
+}
+.pd-empty--bare { border: 0; }
+.pd-empty__icon { width: 44px; height: 44px; opacity: .35; }
+.pd-empty__title {
+  font-family: var(--font-mono);
+  font-size: 14px; font-weight: 700;
+  color: var(--st-fg);
+}
+.pd-empty__hint { max-width: 30ch; font-size: 11px; line-height: 1.6; color: var(--st-fg-3); }
+
+/* ---------- 12. 表格 ----------------------------------------------------- */
+.pd-table-wrap {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--st-line);
+  border-radius: var(--st-r-lg);
+  background: var(--st-surface);
+}
+.pd-table-wrap::-webkit-scrollbar { width: 8px; }
+.pd-table-wrap::-webkit-scrollbar-track { background: transparent; }
+.pd-table-wrap::-webkit-scrollbar-thumb {
+  border-radius: var(--st-r-pill); background: var(--st-thumb);
+}
+.pd-table {
+  width: 100%;
+  /* separate 而非 collapse：collapse 下 sticky 表头的边框会丢 */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: left;
+}
+/* sticky 必须挂在 th 上；原来挂在 tr 上，Chromium 不生效 */
+.pd-table th {
+  position: sticky; top: 0;
+  z-index: 2;
+  padding: var(--st-2) var(--st-3);
+  background: var(--st-surface-2);
+  color: var(--st-fg);
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--st-line-strong);
+}
+.pd-table td {
+  padding: var(--st-2) var(--st-3);
+  box-shadow: inset 0 -1px 0 var(--st-line-soft);
+  vertical-align: middle;
+  color: var(--st-fg-2);
+}
+.pd-table tbody tr:hover td { background: var(--st-surface-2); }
+.pd-table tbody tr.is-managed td { background: color-mix(in srgb, var(--st-accent) 8%, transparent); }
+.pd-table__num { color: var(--st-fg); font-weight: 600; }
+.pd-table__empty { padding: var(--st-6); text-align: center; color: var(--st-fg-3); }
+
+/* ---------- 13. 面板与终端 ----------------------------------------------- */
+.pd-panel {
+  position: relative;
+  display: flex; flex-direction: column;
+  flex: 1 1 auto; min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--st-line);
+  border-radius: var(--st-r-lg);
+  background: var(--st-surface-2);
+  box-shadow: var(--st-shadow-sm);
+}
+.pd-panel__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--st-2);
+  flex: 0 0 auto;
+  padding: var(--st-2) var(--st-3);
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-surface-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px; font-weight: 700;
+  color: var(--st-fg);
+}
+.pd-panel__body {
+  display: flex; flex-direction: column;
+  flex: 1 1 auto; min-height: 0;
+  padding: var(--st-3);
+  gap: var(--st-2);
+}
+.pd-dot {
+  width: 7px; height: 7px; flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--tone, var(--st-accent));
+  box-shadow: 0 0 6px var(--tone, var(--st-accent));
+}
+.pd-dot--live { animation: pd-pulse 1.6s ease-in-out infinite; }
+
+.pd-monitor {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--st-2);
+  flex: 0 0 auto;
+  padding-bottom: var(--st-2);
+  border-bottom: 1px solid var(--st-line-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--st-accent);
+}
+/* 终端底色改 token：原来硬编码 #010a0a，arctic 亮底主题下是脏的近黑绿 */
+.pd-term {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto;
+  padding: var(--st-3);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-sm);
+  background: var(--st-term-bg);
+  color: var(--st-term-fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  user-select: text;
+}
+.pd-term::-webkit-scrollbar { width: 8px; }
+.pd-term::-webkit-scrollbar-track { background: transparent; }
+.pd-term::-webkit-scrollbar-thumb {
+  border-radius: var(--st-r-pill);
+  background: color-mix(in srgb, var(--st-term-fg) 30%, transparent);
+}
+.pd-term pre {
+  white-space: pre-wrap; word-break: break-all;
+  font-family: inherit; font-size: inherit;
+  line-height: 1.6;
+  user-select: text;
+}
+.pd-term__empty {
+  height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: var(--st-2);
+  text-align: center;
+  color: color-mix(in srgb, var(--st-term-fg) 60%, transparent);
+  user-select: none;
+}
+.pd-term__empty svg { width: 36px; height: 36px; opacity: .5; }
+.pd-statusbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--st-2);
+  flex: 0 0 auto;
+  padding-top: var(--st-2);
+  border-top: 1px solid var(--st-line-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--st-fg-3);
+}
+
+/* ---------- 14. 弹窗 / 表单 ---------------------------------------------- */
+.pd-scrim {
+  position: fixed; inset: 0;
+  z-index: var(--z-modal);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--st-4);
+  background: var(--st-scrim);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: pd-rise .15s var(--st-ease);
+}
+.pd-modal {
+  display: flex; flex-direction: column;
+  width: 100%; max-width: 560px;
+  max-height: min(88vh, 760px);
+  overflow: hidden;
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-modal);
+  background: var(--st-surface);
+  box-shadow: var(--st-shadow);
+  color: var(--st-fg);
+  font-family: var(--font-mono);
+}
+.pd-modal__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--st-3);
+  flex: 0 0 auto;
+  padding: var(--st-4) var(--st-5);
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-surface-2);
+}
+.pd-modal__title { font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+.pd-modal__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--st-5); }
+.pd-modal__foot {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: var(--st-2);
+  flex: 0 0 auto;
+  padding: var(--st-3) var(--st-5);
+  border-top: 1px solid var(--st-line);
+  background: var(--st-surface-2);
+}
+
+.pd-form  { display: flex; flex-direction: column; gap: var(--st-4); }
+.pd-grid2 { display: grid; grid-template-columns: minmax(0,1fr); gap: var(--st-4); }
+@media (min-width: 768px) {
+  .pd-grid2 { grid-template-columns: 2fr 1fr; }
+}
+.pd-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.pd-label { font-size: 11px; color: var(--st-fg-3); }
+.pd-input, .pd-textarea {
+  width: 100%;
+  padding: 8px var(--st-3);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-sm);
+  background: color-mix(in srgb, var(--background) 65%, var(--card-bg));
+  color: var(--st-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: border-color .15s var(--st-ease), box-shadow .15s var(--st-ease);
+}
+.pd-textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
+.pd-input:focus, .pd-textarea:focus {
+  outline: none;
+  border-color: var(--st-accent);
+  box-shadow: 0 0 0 3px var(--st-ring);
+}
+.pd-input:disabled { opacity: .5; }
+.pd-input.is-invalid {
+  border-color: var(--tone-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone-danger) 26%, transparent);
+}
+.pd-field__note { font-size: 10px; line-height: 1.5; color: var(--st-fg-3); }
+.pd-field__note--error { color: var(--tone-danger); }
+.pd-check {
+  display: inline-flex; align-items: center; gap: var(--st-2);
+  font-size: 10.5px; color: var(--st-fg-2);
+  cursor: pointer;
+}
+.pd-check input { width: 13px; height: 13px; accent-color: var(--st-accent); }
+
+/* ---------- 15. 对话框 --------------------------------------------------- */
+.pd-dialog-scrim {
+  position: fixed; inset: 0;
+  z-index: var(--z-dialog);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--st-4);
+  background: var(--st-scrim);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.pd-dialog {
+  width: 100%; max-width: 440px;
+  display: flex; flex-direction: column;
+  gap: var(--st-3);
+  padding: var(--st-5);
+  border: 1px solid var(--st-line-strong);
+  border-radius: var(--st-r-modal);
+  background: var(--st-surface);
+  box-shadow: var(--st-shadow);
+  color: var(--st-fg);
+  font-family: var(--font-mono);
+  animation: pd-rise .16s var(--st-ease);
+}
+.pd-dialog__head { display: flex; align-items: center; gap: var(--st-3); }
+.pd-dialog__icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex: 0 0 auto;
+  border-radius: var(--st-r-md);
+  background: color-mix(in srgb, var(--tone) 18%, transparent);
+  color: var(--tone);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 38%, transparent);
+}
+.pd-dialog__icon svg { width: 17px; height: 17px; }
+.pd-dialog__title { font-size: 14.5px; font-weight: 700; }
+.pd-dialog__text {
+  white-space: pre-line;          /* showExternalStateHelp 是多行说明文本 */
+  font-size: 11.5px; line-height: 1.75;
+  color: var(--st-fg-2);
+  max-height: 46vh; overflow-y: auto;
+}
+.pd-dialog__actions {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: var(--st-2);
+  padding-top: var(--st-2);
+  border-top: 1px solid var(--st-line-soft);
+}
+
+/* ---------- 16. toast ---------------------------------------------------- */
+.pd-toaster {
+  position: fixed;
+  right: var(--st-4); bottom: var(--st-4);
+  z-index: var(--z-toast);
+  display: flex; flex-direction: column-reverse;
+  gap: var(--st-2);
+  pointer-events: none;
+}
+.pd-toast {
+  display: flex; align-items: flex-start; gap: var(--st-2);
+  max-width: 380px;
+  padding: var(--st-3);
+  border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
+  border-left: 3px solid var(--tone);
+  border-radius: var(--st-r-md);
+  background: var(--st-surface-2);
+  box-shadow: var(--st-shadow);
+  color: var(--st-fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px; line-height: 1.6;
+  pointer-events: auto;
+  animation: pd-rise .18s var(--st-ease);
+}
+.pd-toast svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--tone); margin-top: 1px; }
+.pd-toast__msg { white-space: pre-line; }
+.pd-toast__close {
+  flex: 0 0 auto; padding: 0 2px;
+  border: 0; background: none;
+  color: var(--st-fg-3);
+  font-size: 14px; line-height: 1;
+}
+.pd-toast__close:hover { color: var(--st-fg); }
+
+/* ---------- 17. 降级 ----------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .pd-led--live .pd-led__ping,
+  .pd-dot--live,
+  .pd-lock--open svg,
+  .pd-btn--spin svg { animation: none; }
+  .pd-scrim, .pd-dialog, .pd-toast { animation: none; }
+}
+</style>
   <!-- Vue 3 -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <style>
@@ -307,6 +1624,8 @@
       --glow-color: rgba(255, 189, 56, 0.35);
       --card-bg: #062a2a;
       --card-border: rgba(255, 230, 203, 0.15);
+      --accent: #ffbd38;
+      --dimmed: #a59381;
       --font-sans: system-ui, -apple-system, sans-serif;
       --font-mono: "JetBrains Mono", ui-monospace, monospace;
     }
@@ -319,117 +1638,41 @@
       overflow-x: hidden;
     }
 
-    /* Noise and scanlines overlay for retro-futuristic terminal aesthetic */
+    /* Noise and scanlines overlay for retro-futuristic terminal aesthetic.
+       颜色与强度改由 --crt-* token 驱动（原来全硬编码，arctic 亮底下发灰脏）。
+       选择器形态必须保持 .crt-overlay::after —— body.crt-disabled.crt-overlay::after
+       靠 (0,2,1) > (0,1,1) 压制它，改动会让 CRT 开关静默失效。 */
     .crt-overlay::after {
       content: " ";
       display: block;
       position: fixed;
       top: 0; left: 0; bottom: 0; right: 0;
-      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+      background: linear-gradient(transparent 50%, var(--crt-stripe) 50%),
                   linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
       background-size: 100% 4px, 6px 100%;
-      z-index: 99999;
-      opacity: 0.45;
+      mix-blend-mode: var(--crt-blend);
+      z-index: var(--z-crt);
+      opacity: var(--crt-opacity);
       pointer-events: none;
     }
 
-    /* Ambient glow */
-    .ambient-glow {
-      position: fixed;
-      top: 10%;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 80vw;
-      height: 40vh;
-      background: radial-gradient(circle, var(--glow-color) 0%, rgba(4, 28, 28, 0) 70%);
-      z-index: -1;
-      opacity: 0.6;
-      pointer-events: none;
-    }
-
-    /* Custom scrollbars */
+    /* Custom scrollbars。颜色改 token —— 原来硬编码 teal/cream，arctic 下轨道是深绿 */
     ::-webkit-scrollbar {
       width: 6px;
       height: 6px;
     }
     ::-webkit-scrollbar-track {
-      background: rgba(4, 28, 28, 0.5);
+      background: var(--st-track);
     }
     ::-webkit-scrollbar-thumb {
-      background: rgba(255, 230, 203, 0.3);
+      background: var(--st-thumb);
       border-radius: 3px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: rgba(255, 230, 203, 0.6);
+      background: var(--st-thumb-hover);
     }
 
-    .retro-border {
-      border: 1px solid var(--card-border);
-      box-shadow: 0 0 15px rgba(255, 189, 56, 0.05);
-      transition: all 0.3s ease;
-    }
-    .retro-border:hover {
-      border-color: rgba(255, 230, 203, 0.4);
-      box-shadow: 0 0 20px rgba(255, 189, 56, 0.15);
-    }
-    
-    .glow-active {
-      border-color: var(--midground);
-      box-shadow: 0 0 25px rgba(255, 189, 56, 0.25);
-    }
-
-    .glow-led {
-      position: relative;
-    }
-    .glow-led::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      border-radius: 9999px;
-      width: 100%;
-      height: 100%;
-      opacity: 0.6;
-      filter: blur(4px);
-      z-index: -1;
-    }
-
-    .terminal-output {
-      font-family: var(--font-mono);
-      background-color: #010a0a;
-      border: 1px solid rgba(255, 230, 203, 0.2);
-    }
-
-    @keyframes spin-once {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-    .spin-refresh {
-      animation: spin-once 0.6s ease-in-out;
-    }
   </style>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            hermes: {
-              teal: '#041c1c',
-              cream: '#ffe6cb',
-              accent: '#ffbd38',
-              card: '#062a2a',
-              dimmed: '#a59381'
-            }
-          },
-          fontFamily: {
-            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
-            sans: ['system-ui', '-apple-system', 'sans-serif']
-          }
-        }
-      }
-    }
-  </script>
   <script>
 /* theme variable maps */
 const THEME_VARIABLES = {
@@ -478,161 +1721,134 @@ function applyTheme(themeId) {
   Object.entries(vars).forEach(([k, v]) => {
     if (k !== '--label') root.style.setProperty(k, v);
   });
-  /* tailwind theme name reference (hermes-* classes still resolve via static config) */
+  /* body[data-theme] 是逐主题 token 覆写（--st-* / --tone-*）的挂载点 */
   document.body.dataset.theme = themeId;
 }
   </script>
 </head>
-<body class="h-full crt-overlay">
-  <div class="ambient-glow"></div>
-  
-  <!-- Premium matte noise overlay for that subtle Hermes-style grain texture -->
-  <div class="fixed inset-0 pointer-events-none z-[9999] opacity-[0.065] mix-blend-overlay" style="background-image: url(&quot;data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E&quot;);"></div>
+<body class="crt-overlay">
+  <div class="pd-ambient"></div>
+  <div class="pd-noise"></div>
 
-  <div id="app" class="flex flex-col h-full max-h-screen relative z-10 p-4 md:p-6 select-none" v-cloak>
-    
+  <div id="app" class="pd-app" v-cloak>
+
     <!-- 顶部标题栏 -->
-    <header class="relative flex flex-col md:flex-row md:items-center border-b border-hermes-cream/20 pb-4 mb-6 gap-4">
-        <div class="flex items-center space-x-4 shrink-0">
-          <!-- SVG Logo (Retro geometric style like Hermes) -->
-          <div class="w-12 h-12 flex items-center justify-center border-2 border-hermes-cream relative glow-active shrink-0">
-            <span class="font-bold text-xl text-hermes-cream font-mono">P</span>
-            <div class="absolute -top-1 -left-1 w-2 h-2 bg-hermes-accent"></div>
-            <div class="absolute -bottom-1 -right-1 w-2 h-2 bg-hermes-accent"></div>
-          </div>
+    <header class="pd-header">
+        <div class="pd-brand">
+          <div class="pd-brand__mark">P</div>
           <div>
-            <h1 class="text-2xl font-bold font-mono tracking-wider text-hermes-cream">
-              PORT DASHBOARD
-            </h1>
-            <p class="text-xs text-hermes-dimmed tracking-wide mt-1">本地服务端口及生命周期可视化控制台</p>
+            <h1 class="pd-brand__title">PORT DASHBOARD</h1>
+            <p class="pd-brand__sub">本地服务端口及生命周期可视化控制台</p>
           </div>
         </div>
 
         <!-- 中间弹性空间 + Settings 按钮 -->
-        <div class="hidden md:block flex-1"></div>
+        <div class="pd-spacer"></div>
 
         <!-- Settings 入口按钮 -->
         <button
           @click="showSettingsModal = true; activeSettingsSection = 'theme';"
-          class="settings-trigger group flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)]/70 backdrop-blur-sm hover:border-hermes-accent hover:bg-hermes-accent/10 transition-all duration-200 cursor-pointer shrink-0"
-          title="Settings / 设置"
+          class="settings-trigger"
+          title="Settings / 设置 (⌘,)"
         >
-          <svg class="w-4 h-4 text-hermes-accent group-hover:rotate-45 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35"></path>
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
           </svg>
-          <span class="text-[11px] font-mono font-semibold tracking-wider text-[var(--midground)]">SETTING</span>
-          <span class="kbd-hint hidden lg:inline text-[9px] font-mono px-1.5 py-0.5 rounded border border-[var(--card-border)] text-hermes-dimmed opacity-0 group-hover:opacity-100 transition-opacity">⌘ ,</span>
+          <span class="settings-trigger-label">SETTING</span>
+          <span class="settings-trigger-kbd">⌘ ,</span>
         </button>
 
       <!-- 系统状态仪表盘 -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs w-full md:w-auto font-mono">
+      <div class="pd-metrics">
         <!-- IP地址 -->
-        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
-          <span class="text-hermes-dimmed">本机 IP</span>
-          <span class="text-hermes-accent font-semibold mt-0.5 flex items-center gap-1">
-            <svg class="w-3 h-3 text-hermes-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+        <div class="pd-metric">
+          <span class="pd-metric__label">本机 IP</span>
+          <span class="pd-metric__value">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
             {{ stats.ip_address }}
           </span>
         </div>
         <!-- CPU 使用率 -->
-        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
-          <div class="flex justify-between items-center text-hermes-dimmed">
-            <span>CPU 使用</span>
-            <span>{{ stats.cpu_percent }}%</span>
+        <div class="pd-metric">
+          <div class="pd-row pd-row--between">
+            <span class="pd-metric__label">CPU 使用</span>
+            <span class="pd-metric__label">{{ stats.cpu_percent }}%</span>
           </div>
-          <div class="w-24 bg-hermes-teal/80 h-1.5 rounded-full overflow-hidden mt-1.5 border border-hermes-cream/10">
-            <div class="bg-hermes-accent h-full transition-all duration-300" :style="{ width: stats.cpu_percent + '%' }"></div>
+          <div class="pd-meter">
+            <div class="pd-meter__fill" :style="{ width: stats.cpu_percent + '%' }"></div>
           </div>
         </div>
         <!-- 内存使用率 -->
-        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
-          <div class="flex justify-between items-center text-hermes-dimmed">
-            <span>内存使用</span>
-            <span>{{ stats.memory ? stats.memory.percent : 0 }}%</span>
+        <div class="pd-metric">
+          <div class="pd-row pd-row--between">
+            <span class="pd-metric__label">内存使用</span>
+            <span class="pd-metric__label">{{ stats.memory ? stats.memory.percent : 0 }}%</span>
           </div>
-          <div class="w-24 bg-hermes-teal/80 h-1.5 rounded-full overflow-hidden mt-1.5 border border-hermes-cream/10">
-            <div class="bg-hermes-accent h-full transition-all duration-300" :style="{ width: (stats.memory ? stats.memory.percent : 0) + '%' }"></div>
+          <div class="pd-meter">
+            <div class="pd-meter__fill" :style="{ width: (stats.memory ? stats.memory.percent : 0) + '%' }"></div>
           </div>
         </div>
         <!-- 系统运行时间 -->
-        <div class="retro-border bg-hermes-card/60 p-2 rounded flex flex-col justify-center">
-          <span class="text-hermes-dimmed">控制中心 UPTIME</span>
-          <span class="text-hermes-cream font-semibold mt-0.5">{{ stats.uptime || '0s' }}</span>
+        <div class="pd-metric">
+          <span class="pd-metric__label">控制中心 UPTIME</span>
+          <span class="pd-metric__value pd-metric__value--plain">{{ stats.uptime || '0s' }}</span>
         </div>
       </div>
     </header>
 
     <!-- 主要内容区：分左右布局 -->
-    <main class="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 overflow-hidden">
-      
+    <main class="pd-main">
+
       <!-- 导航和左侧托管服务 (8 col on XL) -->
-      <section class="xl:col-span-8 flex flex-col h-full overflow-hidden">
-        
+      <section class="pd-col-main pd-pane">
+
         <!-- 切换 Tab 按钮 & 高危操作安全锁 -->
-        <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-hermes-cream/10 pb-3 mb-4 gap-3">
-          <div class="flex space-x-2">
-            <button
-              @click="activeTab = 'managed'"
-              :class="[activeTab === 'managed' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
-              class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
-            >
-              ┊ 托管项目 ({{ projects.length }})
-            </button>
-            <button
-              @click="activeTab = 'local'"
-              :class="[activeTab === 'local' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
-              class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
-            >
-              ┊ 本地端口 ({{ groupedLocalPorts.length }})
-            </button>
-            <button
-              @click="activeTab = 'system'"
-              :class="[activeTab === 'system' ? 'bg-hermes-cream text-hermes-teal font-semibold shadow-md' : 'text-hermes-cream border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10']"
-              class="px-4 py-2 text-sm font-mono tracking-wider uppercase transition-all duration-200"
-            >
-              ┊ 全局端口 ({{ systemPorts.length }})
-            </button>
+        <div class="pd-tabbar">
+          <div class="pd-tabs">
+            <button class="pd-tab" :class="activeTab === 'managed' ? 'is-active' : ''"
+                    @click="activeTab = 'managed'">托管项目 ({{ projects.length }})</button>
+            <button class="pd-tab" :class="activeTab === 'local' ? 'is-active' : ''"
+                    @click="activeTab = 'local'">本地端口 ({{ groupedLocalPorts.length }})</button>
+            <button class="pd-tab" :class="activeTab === 'system' ? 'is-active' : ''"
+                    @click="activeTab = 'system'">全局端口 ({{ systemPorts.length }})</button>
           </div>
 
           <!-- 高危操作安全防护锁 -->
-          <div class="flex items-center space-x-2 font-mono text-xs select-none">
-            <span class="text-hermes-dimmed">高危安全锁:</span>
-            <button 
+          <div class="pd-row">
+            <span class="pd-caps">高危安全锁</span>
+            <button
               @click="safetyLock = !safetyLock"
-              :class="[safetyLock ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-400' : 'bg-rose-950/50 border-rose-500 text-rose-400 shadow-[0_0_10px_rgba(239,68,68,0.2)]']"
-              class="border rounded px-3 py-1.5 flex items-center gap-1.5 transition-all cursor-pointer font-bold"
+              class="pd-lock"
+              :class="safetyLock ? '' : 'pd-lock--open'"
+              :data-tone="safetyLock ? 'ok' : 'danger'"
             >
-              <svg v-if="safetyLock" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
-              <svg v-else class="w-3.5 h-3.5 animate-bounce" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"></path></svg>
+              <svg v-if="safetyLock" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
+              <svg v-else fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"></path></svg>
               {{ safetyLock ? '已锁定 (安全模式)' : '已解除 (高危允许)' }}
             </button>
           </div>
         </div>
 
         <!-- 托管服务面板 -->
-        <div v-if="activeTab === 'managed'" class="flex-1 flex flex-col overflow-hidden">
+        <div v-if="activeTab === 'managed'" class="pd-pane">
           
           <!-- 操作与提示栏 -->
-          <div class="flex justify-between items-center mb-4">
-            <p class="text-xs text-hermes-dimmed font-mono">
-              在这里注册并托管您的网页项目，轻松实现 Windows 环境下一键快捷启闭
-              <span class="text-hermes-dimmed/50 ml-1">(每 3s 自动刷新)</span>
-              <span v-if="!autoRefresh" class="text-hermes-dimmed/50 ml-1">(自动刷新已关闭)</span>
+          <div class="pd-row pd-row--between" style="margin-bottom: var(--st-4);">
+            <p class="pd-hint">
+              在这里注册并托管您的网页项目，轻松实现一键快捷启闭
+              <span v-if="autoRefresh" style="opacity:.6">（每 {{ refreshInterval }}s 自动刷新）</span>
+              <span v-else style="opacity:.6">（自动刷新已关闭）</span>
             </p>
-            <div class="flex items-center gap-2">
+            <div class="pd-row">
               <!-- 自动刷新开关 -->
               <button
                 @click="toggleAutoRefresh()"
-                :class="[
-                  'px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all border',
-                  autoRefresh
-                    ? 'bg-hermes-accent/20 text-hermes-accent border-hermes-accent/40 hover:bg-hermes-accent/30'
-                    : 'text-hermes-dimmed border-hermes-dimmed/30 hover:border-hermes-dimmed hover:bg-hermes-dimmed/10'
-                ]"
+                class="pd-btn pd-btn--tone pd-btn--sm"
+                :data-tone="autoRefresh ? 'accent' : 'muted'"
                 :title="autoRefresh ? '点击关闭自动刷新' : '点击开启自动刷新'"
               >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path v-if="autoRefresh" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                   <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
@@ -641,175 +1857,144 @@ function applyTheme(themeId) {
               <button
                 @click="manualRefresh()"
                 :disabled="snapshotLoading"
-                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream hover:bg-hermes-cream/10 px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                class="pd-btn pd-btn--sm"
+                :class="snapshotLoading ? 'pd-btn--spin' : ''"
                 title="手动刷新端口状态"
               >
-                <svg :class="['w-3.5 h-3.5', snapshotLoading ? 'animate-spin' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
                 刷新
               </button>
-              <button 
-                @click="openAddProjectModal()" 
-                class="bg-hermes-accent text-hermes-teal font-semibold hover:bg-hermes-cream transition-all px-3 py-1.5 text-xs font-mono flex items-center gap-1.5 shadow-lg border border-hermes-cream/20"
+              <button
+                @click="openAddProjectModal()"
+                class="pd-btn pd-btn--solid pd-btn--sm"
+                data-tone="accent"
               >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                 新增托管项目
               </button>
             </div>
           </div>
 
           <!-- 托管服务列表 -->
-          <div class="flex-1 overflow-y-auto pr-1 space-y-4">
-            
+          <div class="pd-scroll">
+
             <!-- 空状态 -->
-            <div v-if="projects.length === 0" class="retro-border bg-hermes-card/30 p-12 text-center rounded flex flex-col items-center justify-center">
-              <svg class="w-12 h-12 text-hermes-dimmed/40 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
-              <h3 class="font-mono text-base font-semibold text-hermes-cream">暂无托管项目</h3>
-              <p class="text-xs text-hermes-dimmed mt-2 max-w-sm">您还没有创建任何托管项目。您可以点击上方按钮手动创建，或者在“全局端口”中直接将已运行的项目一键导入托管。</p>
+            <div v-if="projects.length === 0" class="pd-empty">
+              <svg class="pd-empty__icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+              <h3 class="pd-empty__title">暂无托管项目</h3>
+              <p class="pd-empty__hint">您还没有创建任何托管项目。可以点击上方按钮手动创建，或在「全局端口」中把已运行的项目一键导入托管。</p>
             </div>
 
             <!-- 项目卡片 Grid -->
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div 
-                v-for="proj in projects" 
-                :key="proj.id" 
-                :class="[
-                  proj.status === 'running'
-                    ? 'border-hermes-accent/40 bg-hermes-card/80 shadow-[0_0_15px_rgba(255,189,56,0.08)]'
-                    : proj.status === 'external'
-                      ? 'border-sky-400/35 bg-sky-950/10 shadow-[0_0_15px_rgba(56,189,248,0.08)]'
-                      : 'border-hermes-cream/10 bg-hermes-card/30'
-                ]"
-                class="retro-border p-4 rounded relative overflow-hidden flex flex-col justify-between"
+            <div v-else class="pd-cards">
+              <div
+                v-for="proj in projects"
+                :key="proj.id"
+                class="pd-card pd-card--railed"
+                :class="proj.status === 'running' ? 'pd-card--active' : ''"
+                :data-tone="proj.status === 'running' ? 'accent' : proj.status === 'external' ? 'info' : 'muted'"
               >
                 <!-- 卡片顶部：服务名与运行指示器 -->
-                <div class="mb-3">
-                  <div class="flex justify-between items-start">
-                    <div class="flex items-center space-x-2">
+                <div>
+                  <div class="pd-row pd-row--between pd-row--wrap">
+                    <div class="pd-row">
                       <!-- 状态呼吸灯 LED -->
-                      <span class="relative flex h-2.5 w-2.5">
-                        <span 
-                          :class="[
-                            proj.status === 'running'
-                              ? 'bg-emerald-400 animate-ping'
-                              : proj.status === 'external'
-                                ? 'bg-sky-400 animate-ping'
-                                : 'bg-stone-500'
-                          ]"
-                          class="absolute inline-flex h-full w-full rounded-full opacity-75"
-                        ></span>
-                        <span 
-                          :class="[
-                            proj.status === 'running'
-                              ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
-                              : proj.status === 'external'
-                                ? 'bg-sky-500 shadow-[0_0_8px_#0ea5e9]'
-                                : 'bg-stone-600'
-                          ]"
-                          class="relative inline-flex rounded-full h-2.5 w-2.5"
-                        ></span>
+                      <span class="pd-led" :class="proj.status === 'stopped' ? '' : 'pd-led--live'">
+                        <span class="pd-led__ping"></span>
+                        <span class="pd-led__dot"></span>
                       </span>
-                      <h4 class="font-mono font-bold text-hermes-cream text-base tracking-wide">{{ proj.name }}</h4>
+                      <h4 class="pd-card__title">{{ proj.name }}</h4>
                     </div>
-                    <span
-                      :class="projectStatusMeta(proj).class"
-                      class="font-mono text-[10px] px-2 py-0.5 border rounded uppercase tracking-wide"
-                    >
-                      {{ projectStatusMeta(proj).label }}
-                    </span>
-                    <!-- 端口标签 -->
-                    <span class="font-mono text-xs px-2 py-0.5 bg-hermes-teal border border-hermes-cream/20 text-hermes-cream rounded">
-                      PORT: <strong class="text-hermes-accent font-bold">{{ proj.port }}</strong>
-                    </span>
+                    <div class="pd-row">
+                      <span class="pd-badge pd-badge--caps" :data-tone="projectStatusMeta(proj).tone">
+                        {{ projectStatusMeta(proj).label }}
+                      </span>
+                      <span class="pd-port-tag">PORT <strong>{{ proj.port }}</strong></span>
+                    </div>
                   </div>
-                  <p class="text-xs text-hermes-dimmed mt-1.5 h-8 line-clamp-2 overflow-hidden">{{ proj.description || '暂无项目说明' }}</p>
+                  <p class="pd-card__desc pd-clamp-2">{{ proj.description || '暂无项目说明' }}</p>
                 </div>
 
                 <!-- 卡片中部：路径与启动命令 -->
-                <div class="space-y-1.5 bg-black/40 p-2.5 rounded border border-hermes-cream/5 font-mono text-xs text-hermes-dimmed mb-4">
-                  <div class="flex items-start gap-1 overflow-hidden">
-                    <span class="text-hermes-accent shrink-0">CWD:</span>
-                    <span class="truncate" :title="proj.cwd">{{ proj.cwd }}</span>
+                <div class="pd-code">
+                  <div class="pd-code__row">
+                    <span class="pd-code__key">CWD</span>
+                    <span class="pd-truncate" :title="proj.cwd">{{ proj.cwd }}</span>
                   </div>
-                  <div class="flex items-start gap-1 overflow-hidden">
-                    <span class="text-hermes-accent shrink-0">CMD:</span>
-                    <span class="truncate text-hermes-cream" :title="proj.command">{{ proj.command }}</span>
+                  <div class="pd-code__row">
+                    <span class="pd-code__key">CMD</span>
+                    <span class="pd-truncate" :title="proj.command">{{ proj.command }}</span>
                   </div>
-                  <div class="flex justify-between text-[10px] text-hermes-dimmed border-t border-hermes-cream/5 pt-1 mt-1">
-                    <span>所有者: <strong class="text-hermes-cream">{{ proj.owner }}</strong></span>
-                    <span v-if="proj.pid">PID: <strong class="text-hermes-accent">{{ proj.pid }}</strong></span>
+                  <div class="pd-code__meta">
+                    <span>所有者 <strong>{{ proj.owner }}</strong></span>
+                    <span v-if="proj.pid">PID <strong>{{ proj.pid }}</strong></span>
                   </div>
                 </div>
 
                 <!-- 卡片底部：操作控制区 -->
-                <div class="flex gap-2 text-xs pt-1 border-t border-hermes-cream/10">
+                <div class="pd-card__foot">
                   <button
                     @click="openPortPage(proj.port)"
                     :disabled="!proj.port_active"
-                    class="bg-hermes-accent/15 hover:bg-hermes-accent hover:text-hermes-teal border border-hermes-accent/40 text-hermes-accent font-mono px-3 py-1.5 rounded transition-all flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-hermes-accent/15 disabled:hover:text-hermes-accent"
+                    class="pd-btn pd-btn--tone"
+                    data-tone="accent"
                     :title="proj.port_active ? `访问 ${buildPortUrl(proj.port)}` : '端口当前未监听，无法访问页面'"
                   >
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
                     访问页面
                   </button>
                   <!-- 启闭控制 -->
-                  <button 
-                    v-if="proj.status === 'stopped'" 
+                  <button
+                    v-if="proj.status === 'stopped'"
                     @click="startProject(proj.id)"
                     :disabled="loadingStates[proj.id]"
-                    class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="pd-btn pd-btn--solid pd-btn--block"
+                    data-tone="ok"
                   >
-                    <span v-if="loadingStates[proj.id]">正在启动...</span>
+                    <span v-if="loadingStates[proj.id]">正在启动…</span>
                     <template v-else>
-                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      <svg fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                       启动
                     </template>
                   </button>
-                  <button 
+                  <button
                     v-else-if="proj.status === 'running'"
                     @click="stopProject(proj.id)"
                     :disabled="loadingStates[proj.id]"
-                    class="flex-1 bg-rose-700 hover:bg-rose-600 text-white font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(244,63,94,0.15)]"
+                    class="pd-btn pd-btn--solid pd-btn--block"
+                    data-tone="danger"
                   >
-                    <span v-if="loadingStates[proj.id]">正在停止...</span>
+                    <span v-if="loadingStates[proj.id]">正在停止…</span>
                     <template v-else>
-                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                      <svg fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                       关闭
                     </template>
                   </button>
                   <button
                     v-else
                     @click="showExternalStateHelp(proj)"
-                    class="flex-1 bg-sky-950/40 hover:bg-sky-900/50 text-sky-300 border border-sky-500/30 font-mono py-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    class="pd-btn pd-btn--tone pd-btn--block"
+                    data-tone="info"
                   >
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     外部运行中
                   </button>
 
                   <!-- 实时日志 -->
-                  <button 
-                    @click="openLogsPanel(proj)"
-                    class="bg-hermes-teal hover:bg-hermes-card border border-hermes-cream/30 hover:border-hermes-cream text-hermes-cream font-mono px-3 py-1.5 rounded transition-all flex items-center gap-1 cursor-pointer"
-                  >
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                  <button @click="openLogsPanel(proj)" class="pd-btn">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                     日志
                   </button>
 
                   <!-- 编辑配置 -->
-                  <button 
-                    @click="openEditProjectModal(proj)"
-                    class="bg-hermes-teal hover:bg-hermes-card border border-hermes-cream/30 hover:border-hermes-cream text-hermes-cream font-mono p-1.5 rounded transition-all cursor-pointer"
-                    title="编辑项目配置"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                  <button @click="openEditProjectModal(proj)" class="pd-btn pd-btn--icon" title="编辑项目配置">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
                   </button>
 
                   <!-- 删除项目 -->
-                  <button 
-                    @click="deleteProject(proj)"
-                    class="bg-hermes-teal hover:bg-rose-950/40 border border-hermes-cream/10 hover:border-rose-800 text-hermes-dimmed hover:text-rose-400 font-mono p-1.5 rounded transition-all cursor-pointer"
-                    title="删除托管"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                  <button @click="deleteProject(proj)" class="pd-btn pd-btn--icon pd-btn--tone"
+                          data-tone="danger" title="删除托管">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                   </button>
                 </div>
               </div>
@@ -819,171 +2004,103 @@ function applyTheme(themeId) {
         </div>
 
         <!-- 本地端口面板 -->
-        <div v-if="activeTab === 'local'" class="flex-1 flex flex-col overflow-hidden">
+        <div v-if="activeTab === 'local'" class="pd-pane">
 
-          <div class="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-3 mb-4">
-            <p class="text-xs text-hermes-dimmed font-mono">
-              自动检测你启动的所有本地应用端口（按进程分组）
-            </p>
-            <div class="flex items-center space-x-3 shrink-0">
+          <div class="pd-row pd-row--between pd-row--wrap" style="margin-bottom: var(--st-4);">
+            <p class="pd-hint">自动检测你启动的所有本地应用端口（按进程分组）</p>
+            <div class="pd-row pd-row--gap3">
               <!-- 分类过滤按键组 -->
-              <div class="flex bg-black/60 rounded border border-hermes-cream/15 p-0.5 select-none shrink-0">
-                <button
-                  type="button"
-                  @click="toggleLocalCategory('all')"
-                  :class="[localCategoryFilter === 'all' ? 'bg-hermes-cream text-hermes-teal font-semibold' : 'text-hermes-dimmed hover:text-hermes-cream']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  全部 ({{ groupedLocalPorts.length }})
-                </button>
-                <button
-                  type="button"
-                  @click="toggleLocalCategory('user')"
-                  :class="[localCategoryFilter === 'user' ? 'bg-emerald-500 text-black font-semibold' : 'text-emerald-500/60 hover:text-emerald-400']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  我的应用 ({{ localCategoryCounts.user }})
-                </button>
-                <button
-                  type="button"
-                  @click="toggleLocalCategory('creative')"
-                  :class="[localCategoryFilter === 'creative' ? 'bg-violet-500 text-black font-semibold' : 'text-violet-500/60 hover:text-violet-400']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  创意软件 ({{ localCategoryCounts.creative }})
-                </button>
-                <button
-                  type="button"
-                  @click="toggleLocalCategory('network')"
-                  :class="[localCategoryFilter === 'network' ? 'bg-blue-500 text-black font-semibold' : 'text-blue-500/60 hover:text-blue-400']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  网络工具 ({{ localCategoryCounts.network }})
-                </button>
-                <button
-                  type="button"
-                  @click="toggleLocalCategory('system')"
-                  :class="[localCategoryFilter === 'system' ? 'bg-stone-500 text-black font-semibold' : 'text-stone-500/60 hover:text-stone-400']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  系统服务 ({{ localCategoryCounts.system }})
+              <div class="pd-pills">
+                <button v-for="opt in localCategoryOptions" :key="opt.id"
+                        type="button"
+                        class="pd-pill"
+                        :class="localCategoryFilter === opt.id ? 'is-active' : ''"
+                        :data-tone="opt.tone"
+                        @click="toggleLocalCategory(opt.id)">
+                  {{ opt.label }} ({{ opt.id === 'all' ? groupedLocalPorts.length : localCategoryCounts[opt.id] }})
                 </button>
               </div>
 
-              <button
-                @click="manualRefresh()"
-                :disabled="snapshotLoading"
-                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream hover:bg-hermes-cream/10 px-2.5 py-1.5 text-xs font-mono flex items-center gap-1.5 rounded transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="手动刷新"
-              >
-                <svg :class="['w-3.5 h-3.5', snapshotLoading ? 'animate-spin' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
+              <button @click="manualRefresh()" :disabled="snapshotLoading"
+                      class="pd-btn pd-btn--sm"
+                      :class="snapshotLoading ? 'pd-btn--spin' : ''"
+                      title="手动刷新">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
                 刷新
               </button>
             </div>
           </div>
 
           <!-- 本地端口列表（按进程分组） -->
-          <div class="flex-1 overflow-y-auto pr-1">
+          <div class="pd-scroll">
             <!-- 空状态 -->
-            <div v-if="filteredLocalPorts.length === 0" class="flex flex-col items-center justify-center h-64 text-hermes-dimmed font-mono">
-              <svg class="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
-              <p class="text-sm">暂无本地应用端口</p>
-              <p class="text-xs mt-1 opacity-60">启动你的应用后会自动显示在这里</p>
+            <div v-if="filteredLocalPorts.length === 0" class="pd-empty pd-empty--bare">
+              <svg class="pd-empty__icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+              <p class="pd-empty__title">暂无本地应用端口</p>
+              <p class="pd-empty__hint">启动你的应用后会自动显示在这里</p>
             </div>
 
             <!-- 分组进程列表 -->
-            <div v-else class="space-y-2">
-              <div
-                v-for="group in filteredLocalPorts"
-                :key="group.pid"
-                class="bg-hermes-card/80 border border-hermes-cream/10 rounded-lg p-4 hover:border-hermes-cream/30 transition-all"
-              >
-                <div class="flex items-center justify-between">
+            <div v-else class="pd-stack pd-stack--tight">
+              <div v-for="group in filteredLocalPorts" :key="group.pid"
+                   class="pd-card"
+                   :data-tone="categoryTone(group.category)">
+                <div class="pd-row pd-row--between pd-row--gap4">
                   <!-- 左：进程信息 -->
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-3 mb-1">
-                      <!-- HTTP 标识 -->
-                      <span v-if="group.is_http" class="bg-emerald-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded">HTTP</span>
-                      <span v-else class="bg-stone-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">RPC</span>
-
-                      <!-- 分类标识 -->
-                      <span v-if="group.category === 'user'" class="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-500/30">我的应用</span>
-                      <span v-else-if="group.category === 'creative'" class="bg-violet-500/20 text-violet-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-violet-500/30">创意软件</span>
-                      <span v-else-if="group.category === 'network'" class="bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-500/30">网络工具</span>
-                      <span v-else-if="group.category === 'system'" class="bg-stone-500/20 text-stone-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-stone-500/30">系统服务</span>
-
-                      <!-- 主端口 -->
-                      <span class="text-hermes-accent font-mono font-bold text-lg">{{ group.primary_port }}</span>
-
-                      <!-- 进程名 -->
-                      <span v-if="group.cwd" class="text-hermes-cream text-sm font-semibold truncate">{{ group.cwd.split('\\').pop() || group.process_name }}</span>
-                      <span v-else class="text-hermes-cream text-sm font-medium truncate">{{ group.process_name }}</span>
-
-                      <!-- 进程名括号 -->
-                      <span class="text-hermes-dimmed text-xs font-mono">({{ group.process_name }})</span>
+                  <div class="pd-grow">
+                    <div class="pd-row pd-row--gap3 pd-row--wrap">
+                      <span class="pd-badge pd-badge--solid"
+                            :data-tone="group.is_http ? 'ok' : 'muted'">{{ group.is_http ? 'HTTP' : 'RPC' }}</span>
+                      <span v-if="categoryLabel(group.category)" class="pd-badge"
+                            :data-tone="categoryTone(group.category)">{{ categoryLabel(group.category) }}</span>
+                      <span class="pd-port-num">{{ group.primary_port }}</span>
+                      <span class="pd-card__title pd-truncate">{{ group.cwd ? (group.cwd.split('\\').pop() || group.process_name) : group.process_name }}</span>
+                      <span class="pd-hint">({{ group.process_name }})</span>
                     </div>
 
                     <!-- 端口列表 -->
-                    <div class="text-hermes-dimmed text-xs font-mono">
-                      <span v-if="group.ports.length === 1">
-                        端口 {{ group.ports[0] }}
-                      </span>
+                    <div class="pd-hint pd-mono" style="margin-top: 4px;">
+                      <span v-if="group.ports.length === 1">端口 {{ group.ports[0] }}</span>
                       <span v-else>
-                        {{ group.ports.length }} 个端口:
-                        <span class="text-hermes-cream/70">{{ group.ports.slice(0, 5).join(', ') }}</span>
-                        <span v-if="group.ports.length > 5">...</span>
+                        {{ group.ports.length }} 个端口：{{ group.ports.slice(0, 5).join(', ') }}<span v-if="group.ports.length > 5">…</span>
                       </span>
                       · PID {{ group.pid }}
                     </div>
 
                     <!-- 安全评估与功能释义 -->
-                    <div class="flex items-center gap-2 mt-1">
-                      <span
-                        class="text-[10px] border px-1.5 py-0.2 rounded font-bold shrink-0"
-                        :class="[getPortSafetyInfo(group.primary_port, group.process_name).colorClass]"
-                      >
+                    <div class="pd-row" style="margin-top: 5px;">
+                      <span class="pd-badge"
+                            :data-tone="getPortSafetyInfo(group.primary_port, group.process_name).tone">
                         {{ getPortSafetyInfo(group.primary_port, group.process_name).label }}
                       </span>
-                      <span
-                        class="text-hermes-dimmed truncate block hover:text-hermes-cream text-[11px] cursor-help"
-                        :title="getPortSafetyInfo(group.primary_port, group.process_name).desc"
-                      >
+                      <span class="pd-hint pd-truncate" style="cursor: help;"
+                            :title="getPortSafetyInfo(group.primary_port, group.process_name).desc">
                         {{ getPortSafetyInfo(group.primary_port, group.process_name).desc }}
                       </span>
                     </div>
                   </div>
 
                   <!-- 右：操作按钮 -->
-                  <div class="flex items-center gap-2 shrink-0 ml-4">
-                    <!-- 打开按钮（仅 HTTP 服务） -->
-                    <button
-                      v-if="group.is_http"
-                      @click="openPortPage(group.primary_port)"
-                      class="bg-hermes-accent/15 hover:bg-hermes-accent hover:text-hermes-teal text-hermes-accent border border-hermes-accent/40 px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
-                      :title="`访问 http://localhost:${group.primary_port}`"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
+                  <div class="pd-row" style="flex: 0 0 auto;">
+                    <button v-if="group.is_http" @click="openPortPage(group.primary_port)"
+                            class="pd-btn pd-btn--tone pd-btn--sm" data-tone="accent"
+                            :title="`访问 http://localhost:${group.primary_port}`">
+                      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
                       打开
                     </button>
 
-                    <!-- 导入托管（仅 HTTP 服务且未托管） -->
-                    <button
-                      v-if="group.is_http && !isPortManaged(group.primary_port)"
-                      @click="quickImportPort({ port: group.primary_port, process: group.process_name, pid: group.pid })"
-                      class="bg-hermes-card hover:bg-hermes-cream hover:text-hermes-teal text-hermes-cream border border-hermes-cream/20 px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <button v-if="group.is_http && !isPortManaged(group.primary_port)"
+                            @click="quickImportPort({ port: group.primary_port, process: group.process_name, pid: group.pid })"
+                            class="pd-btn pd-btn--sm">
+                      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                       导入托管
                     </button>
 
-                    <!-- 终止进程 -->
-                    <button
-                      v-if="!safetyLock"
-                      @click="killProcess(group.pid, group.primary_port, 'windows')"
-                      class="bg-rose-950/30 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
-                      title="终止此进程"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    <button v-if="!safetyLock"
+                            @click="killProcess(group.pid, group.primary_port, 'windows')"
+                            class="pd-btn pd-btn--tone pd-btn--sm" data-tone="danger"
+                            title="终止此进程">
+                      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                       终止
                     </button>
                   </div>
@@ -994,158 +2111,108 @@ function applyTheme(themeId) {
         </div>
 
         <!-- 全局端口面板 -->
-        <div v-if="activeTab === 'system'" class="flex-1 flex flex-col overflow-hidden">
-          
-          <div class="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-3 mb-4 font-mono text-xs">
-            <span class="text-hermes-dimmed">实时扫描本机当前处于 LISTEN (监听) 状态的所有 TCP 端口进程</span>
-            <div class="flex items-center space-x-3 shrink-0">
+        <div v-if="activeTab === 'system'" class="pd-pane">
+
+          <div class="pd-row pd-row--between pd-row--wrap" style="margin-bottom: var(--st-4);">
+            <span class="pd-hint">实时扫描本机当前处于 LISTEN (监听) 状态的所有 TCP 端口进程</span>
+            <div class="pd-row pd-row--gap3">
               <!-- 过滤按键组 -->
-              <div class="flex bg-black/60 rounded border border-hermes-cream/15 p-0.5 select-none shrink-0">
-                <button 
-                  type="button"
-                  @click="safetyFilter = 'all'"
-                  :class="[safetyFilter === 'all' ? 'bg-hermes-cream text-hermes-teal font-semibold' : 'text-hermes-dimmed hover:text-hermes-cream']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  全部 ({{ systemPorts.length }})
-                </button>
-                <button 
-                  type="button"
-                  @click="safetyFilter = 'safe'"
-                  :class="[safetyFilter === 'safe' ? 'bg-emerald-500 text-black font-semibold' : 'text-emerald-500/60 hover:text-emerald-400']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  🟢 安全 ({{ safetyCounts.safe }})
-                </button>
-                <button 
-                  type="button"
-                  @click="safetyFilter = 'warning'"
-                  :class="[safetyFilter === 'warning' ? 'bg-amber-500 text-black font-semibold' : 'text-amber-500/60 hover:text-amber-400']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  🟡 警告 ({{ safetyCounts.warning }})
-                </button>
-                <button 
-                  type="button"
-                  @click="safetyFilter = 'danger'"
-                  :class="[safetyFilter === 'danger' ? 'bg-rose-500 text-black font-semibold' : 'text-rose-500/60 hover:text-rose-400']"
-                  class="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
-                >
-                  🔴 极危 ({{ safetyCounts.danger }})
+              <div class="pd-pills">
+                <button v-for="opt in safetyFilterOptions" :key="opt.id"
+                        type="button"
+                        class="pd-pill"
+                        :class="safetyFilter === opt.id ? 'is-active' : ''"
+                        :data-tone="opt.tone"
+                        @click="safetyFilter = opt.id">
+                  {{ opt.label }} ({{ opt.id === 'all' ? systemPorts.length : safetyCounts[opt.id] }})
                 </button>
               </div>
 
               <!-- 刷新按键 -->
-              <button 
-                @click="manualRefresh()" 
-                :disabled="snapshotLoading"
-                class="text-hermes-cream border border-hermes-cream/30 hover:border-hermes-cream px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <svg :class="['w-3 h-3', snapshotLoading ? 'animate-spin' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
+              <button @click="manualRefresh()" :disabled="snapshotLoading"
+                      class="pd-btn pd-btn--xs"
+                      :class="snapshotLoading ? 'pd-btn--spin' : ''">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H17"></path></svg>
                 刷新
               </button>
             </div>
           </div>
 
           <!-- 系统端口列表表格 -->
-          <div class="flex-1 overflow-y-auto border border-hermes-cream/10 rounded bg-hermes-card/20">
-            <table class="w-full text-left font-mono text-xs border-collapse">
+          <div class="pd-table-wrap">
+            <table class="pd-table">
               <thead>
-                <tr class="border-b border-hermes-cream/15 bg-hermes-card/80 sticky top-0 z-10 text-hermes-cream">
-                  <th class="p-3">端口</th>
-                  <th class="p-3">绑定地址</th>
-                  <th class="p-3">运行进程</th>
-                  <th class="p-3">PID</th>
-                  <th class="p-3">安全评估与功能释义</th>
-                  <th class="p-3 text-right">控制操作</th>
+                <tr>
+                  <th>端口</th>
+                  <th>绑定地址</th>
+                  <th>运行进程</th>
+                  <th>PID</th>
+                  <th>安全评估与功能释义</th>
+                  <th style="text-align: right;">控制操作</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-hermes-cream/5">
+              <tbody>
                 <tr v-if="filteredSystemPorts.length === 0">
-                  <td colspan="6" class="p-8 text-center text-hermes-dimmed">
+                  <td colspan="6" class="pd-table__empty">
                     {{ systemPorts.length === 0 ? '未检测到任何正在监听的 TCP 端口服务' : '未检测到符合当前安全过滤条件的 TCP 端口服务' }}
                   </td>
                 </tr>
-                <tr 
-                  v-for="port in filteredSystemPorts" 
-                  :key="port.port" 
-                  class="hover:bg-hermes-card/50 transition-all"
-                  :class="[isPortManaged(port.port) ? 'bg-hermes-card/30 text-hermes-accent' : 'text-hermes-cream/90']"
-                >
+                <tr v-for="port in filteredSystemPorts" :key="port.port"
+                    :class="isPortManaged(port.port) ? 'is-managed' : ''">
                   <!-- 端口 -->
-                  <td class="p-3 font-semibold text-sm">
-                    <span class="text-hermes-accent">#</span> {{ port.port }}
-                  </td>
+                  <td class="pd-table__num">{{ port.port }}</td>
                   <!-- 地址 -->
-                  <td class="p-3 text-hermes-dimmed">{{ port.address }}</td>
+                  <td>{{ port.address }}</td>
                   <!-- 进程名 -->
-                  <td class="p-3">
-                    <span 
-                      :class="[port.process !== 'Unknown' ? 'text-hermes-cream font-medium' : 'text-hermes-dimmed italic']"
-                    >
+                  <td>
+                    <span :class="port.process !== 'Unknown' ? 'pd-table__num' : ''"
+                          :style="port.process === 'Unknown' ? 'font-style: italic' : ''">
                       {{ port.process }}
                     </span>
-                    <!-- 托管标签 -->
-                    <span 
-                      v-if="isPortManaged(port.port)" 
-                      class="ml-2 text-[10px] bg-hermes-accent/25 text-hermes-accent border border-hermes-accent/40 px-1 py-0.2 rounded"
-                    >
-                      DASHBOARD 托管中
-                    </span>
+                    <span v-if="isPortManaged(port.port)" class="pd-badge" data-tone="accent"
+                          style="margin-left: var(--st-2);">托管中</span>
                   </td>
                   <!-- PID -->
-                  <td class="p-3">{{ port.pid || '--' }}</td>
+                  <td>{{ port.pid || '--' }}</td>
                   <!-- 安全评估与功能释义 -->
-                  <td class="p-3 max-w-[320px]">
-                    <div class="flex items-center space-x-2">
-                      <span 
-                        class="text-[10px] border px-1.5 py-0.2 rounded font-bold shrink-0"
-                        :class="[port.safety.colorClass]"
-                      >
-                        {{ port.safety.label }}
-                      </span>
-                      <span class="text-hermes-dimmed truncate block hover:text-hermes-cream text-[11px] cursor-help" :title="port.safety.desc">
+                  <td style="max-width: 320px;">
+                    <div class="pd-row">
+                      <span class="pd-badge" :data-tone="port.safety.tone">{{ port.safety.label }}</span>
+                      <span class="pd-hint pd-truncate" style="cursor: help;" :title="port.safety.desc">
                         {{ port.safety.desc }}
                       </span>
                     </div>
                   </td>
                   <!-- 操作 -->
-                  <td class="p-3 text-right flex justify-end space-x-2">
-                    <!-- 系统核心保护显示 -->
-                    <span 
-                      v-if="port.safety.level === 'danger'" 
-                      class="text-rose-400/60 text-[10px] flex items-center gap-1 select-none font-mono"
-                    >
-                      <svg class="w-3 h-3 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                      🔒 系统强锁保护
-                    </span>
+                  <td>
+                    <div class="pd-row pd-row--end">
+                      <!-- 系统核心保护显示 -->
+                      <span v-if="port.safety.level === 'danger'" class="pd-badge" data-tone="danger">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:11px;height:11px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                        系统强锁保护
+                      </span>
 
-                    <button
-                      @click="openPortPage(port.port)"
-                      class="bg-hermes-accent/15 hover:bg-hermes-accent hover:text-hermes-teal text-hermes-accent border border-hermes-accent/40 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
-                      :title="`访问 ${buildPortUrl(port.port)}`"
-                    >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
-                      打开
-                    </button>
-                    <!-- 导入托管按钮 -->
-                    <button 
-                      v-if="!isPortManaged(port.port) && port.safety.level !== 'danger'"
-                      @click="quickImportPort(port)"
-                      class="bg-hermes-card hover:bg-hermes-cream hover:text-hermes-teal text-hermes-cream border border-hermes-cream/20 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
-                    >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                      导入托管
-                    </button>
-                    <!-- 强杀进程按钮 -->
-                    <button 
-                      v-if="port.pid && port.safety.level !== 'danger'"
-                      @click="killProcess(port.pid, port.port, port.platform || 'windows')"
-                      class="bg-rose-950/30 border border-rose-900 hover:bg-rose-900 text-rose-200 px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-1"
-                    >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                      强杀
-                    </button>
+                      <button @click="openPortPage(port.port)"
+                              class="pd-btn pd-btn--tone pd-btn--xs" data-tone="accent"
+                              :title="`访问 ${buildPortUrl(port.port)}`">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5v14h14v-5"></path></svg>
+                        打开
+                      </button>
+                      <!-- 导入托管按钮 -->
+                      <button v-if="!isPortManaged(port.port) && port.safety.level !== 'danger'"
+                              @click="quickImportPort(port)"
+                              class="pd-btn pd-btn--xs">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        导入托管
+                      </button>
+                      <!-- 强杀进程按钮 -->
+                      <button v-if="port.pid && port.safety.level !== 'danger'"
+                              @click="killProcess(port.pid, port.port, port.platform || 'windows')"
+                              class="pd-btn pd-btn--tone pd-btn--xs" data-tone="danger">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        强杀
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1157,74 +2224,62 @@ function applyTheme(themeId) {
       </section>
 
       <!-- 右侧：实时日志监视控制终端 (4 col on XL) -->
-      <section class="xl:col-span-4 flex flex-col h-full overflow-hidden">
-        
-        <div class="retro-border bg-hermes-card/40 flex-1 flex flex-col overflow-hidden rounded relative">
-          
+      <section class="pd-col-side pd-pane">
+
+        <div class="pd-panel">
+
           <!-- 面板头部 -->
-          <div class="border-b border-hermes-cream/15 p-3 flex justify-between items-center bg-hermes-card/80 sticky top-0 z-10 font-mono text-xs">
-            <span class="text-hermes-cream flex items-center gap-1.5 font-bold">
-              <span class="w-2 h-2 rounded-full bg-hermes-accent animate-pulse"></span>
-              ┊ 实时控制台输出
+          <div class="pd-panel__head">
+            <span class="pd-row">
+              <span class="pd-dot pd-dot--live" data-tone="accent"></span>
+              实时控制台输出
             </span>
-            <div class="flex items-center space-x-2">
+            <div class="pd-row">
               <!-- 清除控制台按钮 -->
-              <button 
-                v-if="activeLogProject"
-                @click="clearLogs()" 
-                class="text-hermes-dimmed hover:text-hermes-cream p-1 rounded transition-all"
-                title="清空控制台日志文件"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+              <button v-if="activeLogProject" @click="clearLogs()"
+                      class="pd-btn pd-btn--ghost pd-btn--icon"
+                      title="清空控制台日志文件">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
               </button>
-              <button 
-                v-if="activeLogProject"
-                @click="copyLogs()" 
-                class="text-hermes-dimmed hover:text-hermes-cream p-1 rounded transition-all"
-                title="拷贝全部日志"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+              <button v-if="activeLogProject" @click="copyLogs()"
+                      class="pd-btn pd-btn--ghost pd-btn--icon"
+                      title="拷贝全部日志">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
               </button>
             </div>
           </div>
 
           <!-- 日志内容容器 -->
-          <div class="flex-1 flex flex-col justify-between overflow-hidden bg-black p-4 font-mono text-xs select-text">
-            
+          <div class="pd-panel__body">
+
             <!-- 激活的项目提示 -->
-            <div v-if="activeLogProject" class="text-hermes-accent border-b border-hermes-cream/10 pb-2 mb-3 shrink-0 flex justify-between items-center">
-              <span>ACTIVE MONITOR: {{ activeLogProject.name }} (PORT {{ activeLogProject.port }})</span>
-              <button 
-                @click="closeLogsPanel()" 
-                class="text-[10px] hover:text-white border border-hermes-accent/40 hover:border-white px-1.5 py-0.2 rounded transition-all cursor-pointer"
-              >
+            <div v-if="activeLogProject" class="pd-monitor">
+              <span class="pd-truncate">ACTIVE MONITOR：{{ activeLogProject.name }} (PORT {{ activeLogProject.port }})</span>
+              <button @click="closeLogsPanel()" class="pd-btn pd-btn--tone pd-btn--xs" data-tone="accent">
                 关闭监听
               </button>
             </div>
 
-            <!-- 终端日志框 -->
-            <div 
-              ref="terminalBox" 
-              class="flex-1 overflow-y-auto space-y-1 terminal-output rounded p-3 text-emerald-400 select-text relative"
-            >
+            <!-- 终端日志框。ref 必须挂在真正滚动的这一层，自动滚动才能到底 -->
+            <div ref="terminalBox" class="pd-term">
               <!-- 无活动日志空状态 -->
-              <div v-if="!activeLogProject" class="absolute inset-0 flex flex-col items-center justify-center text-center text-hermes-dimmed/60 p-6 select-none">
-                <svg class="w-10 h-10 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+              <div v-if="!activeLogProject" class="pd-term__empty">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                 <p>未连接到任何项目控制台</p>
-                <p class="text-[10px] mt-1 text-hermes-dimmed/40">点击托管服务卡片上的“日志”按钮以获取实时日志流</p>
+                <p style="font-size:10px; opacity:.7">点击托管服务卡片上的「日志」按钮以获取实时日志流</p>
               </div>
 
               <!-- 渲染日志文本 -->
-              <pre v-else class="whitespace-pre-wrap font-mono break-all text-[11px] leading-relaxed select-text">{{ logContent }}</pre>
+              <pre v-else>{{ logContent }}</pre>
             </div>
 
             <!-- 控制流 -->
-            <div v-if="activeLogProject" class="mt-3 pt-2 border-t border-hermes-cream/10 shrink-0 flex justify-between items-center text-hermes-dimmed text-[10px] select-none">
-              <span class="flex items-center gap-1">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <div v-if="activeLogProject" class="pd-statusbar">
+              <span class="pd-row">
+                <span class="pd-dot pd-dot--live" data-tone="ok"></span>
                 自动滚动已激活
               </span>
-              <span>行数限值: 200 行</span>
+              <span>行数限值：200 行</span>
             </div>
 
           </div>
@@ -1236,112 +2291,104 @@ function applyTheme(themeId) {
     </main>
 
 <!-- Settings 设置弹窗 -->
-<div
-  v-if="showSettingsModal"
-  class="fixed inset-0 z-50 flex items-center justify-center p-4 settings-backdrop"
-  @click.self="showSettingsModal = false"
-  @keydown.esc="showSettingsModal = false"
-  tabindex="-1"
->
-  <div class="settings-modal relative w-full flex flex-col border border-[var(--card-border)] rounded-2xl font-mono overflow-hidden"
-       style="background: var(--card-bg); max-width: 780px; height: min(82vh, 720px); box-shadow: 0 32px 96px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,189,56,0.06);">
+<div v-if="showSettingsModal" class="settings-backdrop"
+     @click.self="showSettingsModal = false"
+     role="presentation">
+  <div class="settings-modal" role="dialog" aria-modal="true" aria-label="设置">
 
-    <!-- Header: icon + title 双行 + 当前主题标签 + close -->
-    <div class="flex justify-between items-start px-6 pt-5 pb-4 border-b border-[var(--card-border)] shrink-0">
-      <div class="flex items-start gap-3">
-        <div class="w-10 h-10 flex items-center justify-center rounded-xl shrink-0 settings-header-icon">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50"></path>
+    <!-- ===== Header ===== -->
+    <div class="settings-header">
+      <div class="settings-header-left">
+        <div class="settings-header-icon">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35"></path>
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
           </svg>
         </div>
-        <div class="leading-tight">
-          <div class="text-[10px] font-bold tracking-[0.18em] uppercase settings-eyebrow">SETTINGS / 设置</div>
-          <div class="text-[18px] font-bold mt-0.5" style="color: var(--midground);">控制中心偏好</div>
-          <div class="text-[10px] mt-1 settings-eyebrow">主题 · 外观 · 刷新 · 默认 · 高级</div>
+        <div class="settings-header-titles">
+          <div class="settings-eyebrow">SETTINGS / 设置</div>
+          <div class="settings-title">控制中心偏好</div>
+          <div class="settings-subtitle">主题 · 外观 · 刷新 · 默认 · 高级</div>
         </div>
       </div>
-      <div class="flex items-center gap-3 shrink-0">
-        <div class="text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md settings-current-chip">
-                  <span class="w-1.5 h-1.5 rounded-full" :style="{ background: (themeList.find(t => t.id === currentTheme) || {}).swatch || '#888', boxShadow: '0 0 6px ' + ((themeList.find(t => t.id === currentTheme) || {}).swatch || '#888') }"></span>
-                  <span class="font-semibold">{{ themeLabels[currentTheme] || currentTheme }}</span>
-                </div>
-        <button @click="showSettingsModal = false"
-                class="settings-close-btn w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer"
-                aria-label="关闭">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="settings-header-actions">
+        <div class="settings-current-chip">
+          <span class="settings-chip-dot"
+                :style="{ background: currentThemeMeta.swatch,
+                          boxShadow: '0 0 6px ' + currentThemeMeta.swatch }"></span>
+          <span>{{ currentThemeMeta.label }}</span>
+        </div>
+        <button class="settings-close-btn" @click="showSettingsModal = false" aria-label="关闭">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6L6 18"></path>
           </svg>
         </button>
       </div>
     </div>
 
-    <!-- Body: 细 sidebar + 内容 -->
-    <div class="flex flex-1 min-h-0">
+    <!-- ===== Body ===== -->
+    <div class="settings-body">
 
-      <!-- 细 sidebar: icon + 短标签 -->
-      <nav class="settings-sidebar shrink-0 py-3 px-2 flex flex-col gap-1 overflow-y-auto">
+      <nav class="settings-sidebar">
         <button
           v-for="sec in settingsSections"
           :key="sec.id"
           @click="activeSettingsSection = sec.id"
-          class="settings-nav-item group relative flex items-center gap-3 pl-3 pr-3 py-2.5 rounded-lg text-left transition-all cursor-pointer"
+          class="settings-nav-item"
           :class="activeSettingsSection === sec.id ? 'is-active' : ''"
         >
           <span class="settings-nav-bar"></span>
-          <svg class="w-4 h-4 shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="settings-nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" :d="sec.icon"></path>
           </svg>
-          <span class="flex-1 flex flex-col leading-tight min-w-0">
-            <span class="text-[12px] font-semibold truncate">{{ sec.label }}</span>
-            <span class="text-[8.5px] tracking-[0.15em] uppercase opacity-50 truncate">{{ sec.sub }}</span>
+          <span class="settings-nav-text">
+            <span class="settings-nav-label">{{ sec.label }}</span>
+            <span class="settings-nav-sub">{{ sec.sub }}</span>
           </span>
         </button>
       </nav>
 
       <!-- Content -->
-      <div class="flex-1 overflow-y-auto px-7 py-6 text-xs settings-content">
+      <div class="settings-content">
 
         <!-- 01 THEME -->
-        <div v-if="activeSettingsSection === 'theme'">
+        <div class="settings-section" v-if="activeSettingsSection === 'theme'">
           <div class="settings-section-head">
             <div class="settings-eyebrow">SECTION 01 / 配色方案</div>
             <div class="settings-h1">主题</div>
-            <div class="settings-hint">主题决定控制台整体视觉基线,切换立即生效并持久化到本地。</div>
+            <div class="settings-hint">主题决定控制台整体视觉基线，切换立即生效并持久化到本地。</div>
           </div>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="settings-theme-grid">
             <button v-for="t in themeList" :key="t.id" @click="setTheme(t.id)"
-                    class="settings-theme-row group"
+                    class="settings-theme-row"
                     :class="currentTheme === t.id ? 'is-active' : ''"
                     :title="t.label + ' / ' + t.desc">
-              <span class="settings-theme-swatch" :style="{ background: t.swatch, boxShadow: '0 0 8px ' + t.swatch }"></span>
-              <div class="settings-theme-info">
-                <div class="settings-theme-label">{{ t.label }}</div>
-                <div class="settings-theme-desc">{{ t.desc }}</div>
-              </div>
+              <span class="settings-theme-swatch" :style="{ background: t.bg }">
+                <span class="settings-theme-swatch-dot" :style="{ background: t.swatch }"></span>
+              </span>
+              <span class="settings-theme-info">
+                <span class="settings-theme-label">{{ t.label }}</span>
+                <span class="settings-theme-desc">{{ t.desc }}</span>
+              </span>
               <svg v-if="currentTheme === t.id" class="settings-theme-check" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
               </svg>
             </button>
           </div>
-          <div class="settings-info-card mt-5">
-            <div class="flex items-start gap-2">
-              <svg class="w-3.5 h-3.5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <div class="leading-relaxed">
-                主题改变全局颜色变量,所有组件自动跟随。CRT 扫描线由外观面板独立控制。
-              </div>
-            </div>
+          <div class="settings-info-card">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div>主题改变全局颜色变量，所有组件自动跟随。CRT 扫描线由外观面板独立控制。</div>
           </div>
         </div>
 
         <!-- 02 APPEARANCE -->
-        <div v-if="activeSettingsSection === 'appearance'">
+        <div class="settings-section" v-if="activeSettingsSection === 'appearance'">
           <div class="settings-section-head">
             <div class="settings-eyebrow">SECTION 02 / 视觉效果</div>
             <div class="settings-h1">外观</div>
-            <div class="settings-hint">CRT 扫描线模拟复古显示器的逐行扫描效果,可独立开关不影响主题。</div>
+            <div class="settings-hint">CRT 扫描线模拟复古显示器的逐行扫描效果，可独立开关不影响主题。</div>
           </div>
           <div class="settings-row">
             <div class="settings-row-main">
@@ -1349,18 +2396,18 @@ function applyTheme(themeId) {
               <div class="settings-row-desc">覆盖全屏的水平扫描线 + RGB 偏移</div>
             </div>
             <label class="settings-toggle">
-              <input type="checkbox" :checked="crtEnabled" @change="crtEnabled = $event.target.checked; toggleCrtEffects()">
+              <input type="checkbox" :checked="crtEnabled" @change="setCrtEnabled($event.target.checked)">
               <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
             </label>
           </div>
         </div>
 
         <!-- 03 REFRESH -->
-        <div v-if="activeSettingsSection === 'refresh'">
+        <div class="settings-section" v-if="activeSettingsSection === 'refresh'">
           <div class="settings-section-head">
             <div class="settings-eyebrow">SECTION 03 / 数据刷新</div>
             <div class="settings-h1">刷新</div>
-            <div class="settings-hint">自动刷新间隔决定轮询频率。</div>
+            <div class="settings-hint">自动刷新间隔决定轮询频率，修改后立即重启轮询定时器。</div>
           </div>
           <div class="settings-row">
             <div class="settings-row-main">
@@ -1375,10 +2422,10 @@ function applyTheme(themeId) {
           <div class="settings-row" :class="!autoRefresh ? 'is-disabled' : ''">
             <div class="settings-row-main">
               <div class="settings-row-title">刷新间隔</div>
-              <div class="settings-row-desc">3 秒最实时,60 秒最省资源</div>
+              <div class="settings-row-desc">当前 {{ refreshInterval }} 秒 · 3 秒最实时，60 秒最省资源</div>
             </div>
             <div class="settings-segmented">
-              <button v-for="opt in [3,5,10,15,30,60]" :key="opt"
+              <button v-for="opt in allowedRefreshIntervals" :key="opt"
                       @click="setRefreshInterval(opt)"
                       :class="refreshInterval === opt ? 'is-active' : ''"
                       :disabled="!autoRefresh">{{ opt }}s</button>
@@ -1387,11 +2434,11 @@ function applyTheme(themeId) {
         </div>
 
         <!-- 04 DEFAULTS -->
-        <div v-if="activeSettingsSection === 'defaults'">
+        <div class="settings-section" v-if="activeSettingsSection === 'defaults'">
           <div class="settings-section-head">
             <div class="settings-eyebrow">SECTION 04 / 启动默认值</div>
             <div class="settings-h1">默认</div>
-            <div class="settings-hint">下次进入控制台时的初始视图偏好。</div>
+            <div class="settings-hint">下次进入控制台时的初始视图偏好，保存在服务端。</div>
           </div>
           <div class="settings-row">
             <div class="settings-row-main">
@@ -1401,7 +2448,7 @@ function applyTheme(themeId) {
             <div class="settings-segmented">
               <button v-for="opt in defaultTabOptions" :key="opt.id"
                       @click="setDefaultTab(opt.id)"
-                      :class="opt.id === activeTab ? 'is-active' : ''">{{ opt.label }}</button>
+                      :class="opt.id === defaultTab ? 'is-active' : ''">{{ opt.label }}</button>
             </div>
           </div>
           <div class="settings-row">
@@ -1410,189 +2457,215 @@ function applyTheme(themeId) {
               <div class="settings-row-desc">本地端口面板首次加载时的过滤类别</div>
             </div>
             <div class="settings-segmented">
-              <button v-for="opt in [{id:'all',label:'全部'},{id:'user',label:'用户'},{id:'creative',label:'创意'},{id:'network',label:'网络'},{id:'system',label:'系统'}]" :key="opt.id"
+              <button v-for="opt in defaultCategoryOptions" :key="opt.id"
                       @click="setDefaultCategory(opt.id)"
-                      :class="opt.id === localCategoryFilter ? 'is-active' : ''">{{ opt.label }}</button>
+                      :class="opt.id === defaultCategory ? 'is-active' : ''">{{ opt.label }}</button>
             </div>
+          </div>
+          <div class="settings-info-card">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div>默认分类仅支持「全部 / 用户 / 创意」；网络与系统分类仍可在本地端口面板内临时切换。</div>
           </div>
         </div>
 
         <!-- 05 ADVANCED -->
-        <div v-if="activeSettingsSection === 'advanced'">
+        <div class="settings-section" v-if="activeSettingsSection === 'advanced'">
           <div class="settings-section-head">
             <div class="settings-eyebrow">SECTION 05 / 高级</div>
             <div class="settings-h1">高级</div>
-            <div class="settings-hint">涉及服务行为变更,修改后通常需要重启。</div>
+            <div class="settings-hint">涉及服务行为变更，修改后通常需要重启。</div>
           </div>
           <div class="settings-row">
             <div class="settings-row-main">
               <div class="settings-row-title">控制台绑定端口</div>
-              <div class="settings-row-desc">修改后需重启服务生效,默认 9229</div>
+              <div class="settings-row-desc">修改后需重启服务生效，默认 9229</div>
             </div>
-            <input type="number" v-model.number="dashboardPort" min="1024" max="65535"
-                   class="settings-input w-24 text-right">
+            <div class="settings-field">
+              <input class="settings-input is-port" type="number"
+                     v-model.number="dashboardPort" min="1024" max="65535" step="1"
+                     @change="saveDashboardPort()" @keyup.enter="saveDashboardPort()">
+              <span class="settings-field-note">当前运行于 {{ runningPort }}</span>
+            </div>
           </div>
           <div class="settings-row">
             <div class="settings-row-main">
               <div class="settings-row-title">恢复默认设置</div>
-              <div class="settings-row-desc">清空所有偏好并回到出厂状态,不可撤销</div>
+              <div class="settings-row-desc">清空所有偏好并回到出厂状态，不可撤销</div>
             </div>
             <button @click="resetPreferences" class="settings-btn-danger">恢复默认</button>
           </div>
-          <div class="settings-info-card mt-5">
-            <div class="flex items-start gap-2">
-              <svg class="w-3.5 h-3.5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-              </svg>
-              <div class="leading-relaxed">
-                偏好保存在 mydashboard-config.json。点击"恢复默认"会清空该文件并刷新页面。
-              </div>
-            </div>
+          <div class="settings-info-card is-warn" v-if="dashboardPort !== runningPort">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            <div>端口已改为 {{ dashboardPort }}，但服务仍运行在 {{ runningPort }}。重启后生效。</div>
+          </div>
+          <div class="settings-info-card">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div>偏好保存在 mydashboard-config.json。点击「恢复默认」会清空该文件并重新加载偏好。</div>
           </div>
         </div>
 
-      </div>
+      </div><!-- /.settings-content -->
 
-    <!-- Footer -->
-    <div class="settings-footer px-6 py-3 border-t border-[var(--card-border)] flex items-center justify-between shrink-0">
-      <div class="text-[10px] settings-eyebrow flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" style="box-shadow: 0 0 6px #10b981"></span>
+    </div><!-- /.settings-body -->
+
+    <!-- ===== Footer ===== -->
+    <div class="settings-footer">
+      <div class="settings-footer-note">
+        <span class="settings-footer-dot"></span>
         偏好已自动保存
       </div>
-      <div class="flex items-center gap-2">
+      <div class="settings-footer-actions">
         <button @click="showSettingsModal = false" class="settings-btn-ghost">关闭</button>
         <button @click="showSettingsModal = false" class="settings-btn-primary">保存并关闭</button>
       </div>
     </div>
-  </div>
-</div>
+
+  </div><!-- /.settings-modal -->
+</div><!-- /.settings-backdrop -->
 <!-- 弹窗：新增/修改托管项目配置 -->
-    <div 
-      v-if="showProjectModal" 
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-    >
-      <div class="retro-border glow-active bg-hermes-teal w-full max-w-lg rounded-md overflow-hidden flex flex-col shadow-2xl">
+    <div v-if="showProjectModal" class="pd-scrim">
+      <div class="pd-modal" role="dialog" aria-modal="true">
         <!-- 弹窗头 -->
-        <div class="border-b border-hermes-cream/20 bg-hermes-card/90 px-5 py-4 flex justify-between items-center font-mono">
-          <h3 class="text-base font-bold text-hermes-cream tracking-wide">
+        <div class="pd-modal__head">
+          <h3 class="pd-modal__title">
             {{ isEditing ? '编辑托管项目配置' : '新增项目至托管控制' }}
           </h3>
-          <button @click="showProjectModal = false" class="text-hermes-dimmed hover:text-white cursor-pointer text-lg">×</button>
+          <button @click="showProjectModal = false" class="pd-btn pd-btn--ghost pd-btn--icon" aria-label="关闭">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6L6 18"></path>
+            </svg>
+          </button>
         </div>
-        
+
         <!-- 弹窗表单 -->
-        <form @submit.prevent="saveProject" class="p-5 space-y-4 text-xs font-mono">
-          
-          <!-- 项目唯一ID (只在创建时随机生成, 编辑时禁用) -->
-          <div>
-            <label class="block text-hermes-dimmed mb-1.5">唯一标识 (Project ID)</label>
-            <input 
-              v-model="form.id" 
-              type="text" 
-              required 
-              :disabled="isEditing"
-              placeholder="e.g. my-vite-app"
-              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all disabled:opacity-50"
-            >
-          </div>
+        <form @submit.prevent="saveProject" style="display: contents;">
+          <div class="pd-modal__body">
+            <div class="pd-form">
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <!-- 项目名称 -->
-            <div class="md:col-span-2">
-              <label class="block text-hermes-dimmed mb-1.5">项目名称 (Name)</label>
-              <input 
-                v-model="form.name" 
-                type="text" 
-                required 
-                :disabled="form.sync_name"
-                placeholder="e.g. 个人主页前端"
-                class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all disabled:opacity-50"
-              >
-              <label class="mt-2 flex items-center gap-2 text-[10px] text-hermes-dimmed select-none">
-                <input v-model="form.sync_name" type="checkbox" class="accent-[#ffbd38]">
-                自动同步项目名称
-              </label>
-              <p class="text-[10px] text-hermes-dimmed/70 mt-1">
-                开启后会优先从项目目录读取真实名称：`package.json` 的 `productName/name`，或 `pyproject.toml` 的项目名；读不到时回退为目录名。
-              </p>
+              <!-- 项目唯一ID (只在创建时随机生成, 编辑时禁用) -->
+              <div class="pd-field">
+                <label class="pd-label">唯一标识 (Project ID)</label>
+                <input v-model="form.id" type="text" required :disabled="isEditing"
+                       placeholder="e.g. my-vite-app" class="pd-input">
+              </div>
+
+              <div class="pd-grid2">
+                <!-- 项目名称 -->
+                <div class="pd-field">
+                  <label class="pd-label">项目名称 (Name)</label>
+                  <input v-model="form.name" type="text" required :disabled="form.sync_name"
+                         placeholder="e.g. 个人主页前端" class="pd-input">
+                  <label class="pd-check">
+                    <input v-model="form.sync_name" type="checkbox">
+                    自动同步项目名称
+                  </label>
+                  <p class="pd-field__note">
+                    开启后会优先从项目目录读取真实名称：<code>package.json</code> 的 productName/name，或 <code>pyproject.toml</code> 的项目名；读不到时回退为目录名。
+                  </p>
+                </div>
+                <!-- 运行端口 -->
+                <div class="pd-field">
+                  <label class="pd-label">运行端口 (Port)</label>
+                  <input v-model.number="form.port" type="number" required min="1" max="65535"
+                         placeholder="e.g. 3000" class="pd-input">
+                </div>
+              </div>
+
+              <!-- 工作目录 -->
+              <div class="pd-field">
+                <label class="pd-label">工作目录绝对路径 (Working Directory)</label>
+                <input v-model="form.cwd" type="text" required
+                       placeholder="e.g. /Users/me/projects/my-app" class="pd-input">
+                <p class="pd-field__note">项目根目录的绝对路径，启动命令会在这里执行。</p>
+              </div>
+
+              <!-- 启动指令 -->
+              <div class="pd-field">
+                <label class="pd-label">启动指令 (Start Command)</label>
+                <input v-model="form.command" type="text" required
+                       placeholder="e.g. python3 app.py 或 npm run dev"
+                       class="pd-input"
+                       :class="commandValidation.valid ? '' : 'is-invalid'">
+                <p v-if="commandValidation.message" class="pd-field__note"
+                   :class="commandValidation.valid ? '' : 'pd-field__note--error'">
+                  {{ commandValidation.message }}
+                </p>
+              </div>
+
+              <!-- 项目说明 -->
+              <div class="pd-field">
+                <label class="pd-label">项目备注说明 (Description)</label>
+                <textarea v-model="form.description" rows="2"
+                          placeholder="可选填，用于简要描述该网页或项目…"
+                          class="pd-textarea"></textarea>
+              </div>
+
             </div>
-            <!-- 运行端口 -->
-            <div>
-              <label class="block text-hermes-dimmed mb-1.5">运行端口 (Port)</label>
-              <input 
-                v-model.number="form.port" 
-                type="number" 
-                required 
-                min="1" 
-                max="65535"
-                placeholder="e.g. 3000"
-                class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
-              >
-            </div>
-          </div>
-
-          <!-- 工作目录 -->
-          <div>
-            <label class="block text-hermes-dimmed mb-1.5">工作目录绝对路径 (Working Directory)</label>
-            <input 
-              v-model="form.cwd" 
-              type="text" 
-              required 
-              placeholder="e.g. /mnt/g/AITOOLS/mydashboard"
-              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all"
-            >
-            <p class="text-[10px] text-hermes-dimmed/70 mt-1">
-              Windows 目录路径。例如：G:\projects\my-app 或 C:\Users\admin\projects
-            </p>
-          </div>
-
-          <!-- 启动指令 -->
-          <div>
-            <label class="block text-hermes-dimmed mb-1.5">启动指令 (Start Command)</label>
-            <input 
-              v-model="form.command" 
-              type="text" 
-              required 
-              placeholder="e.g. python3 app.py 或 npm run dev"
-              :class="commandValidation.valid ? 'border-hermes-cream/20 focus:border-hermes-accent' : 'border-rose-500/70 focus:border-rose-400'"
-              class="w-full bg-black border rounded px-3 py-2 text-hermes-cream focus:outline-none transition-all"
-            >
-            <p v-if="commandValidation.message" class="text-[10px] mt-1" :class="commandValidation.valid ? 'text-hermes-dimmed/70' : 'text-rose-300'">
-              {{ commandValidation.message }}
-            </p>
-          </div>
-
-          <!-- 项目说明 -->
-          <div>
-            <label class="block text-hermes-dimmed mb-1.5">项目备注说明 (Description)</label>
-            <textarea 
-              v-model="form.description" 
-              rows="2"
-              placeholder="可选填，用于简要描述该网页或项目..."
-              class="w-full bg-black border border-hermes-cream/20 rounded px-3 py-2 text-hermes-cream focus:outline-none focus:border-hermes-accent transition-all resize-none"
-            ></textarea>
           </div>
 
           <!-- 按钮控制 -->
-          <div class="flex justify-end space-x-3 pt-3 border-t border-hermes-cream/10">
-            <button 
-              type="button" 
-              @click="showProjectModal = false"
-              class="border border-hermes-cream/20 hover:border-hermes-cream hover:bg-hermes-cream/10 text-hermes-cream px-4 py-2 font-semibold transition-all cursor-pointer"
-            >
-              取消
-            </button>
-            <button 
-              type="submit" 
-              :disabled="!commandValidation.valid"
-              :class="commandValidation.valid ? 'bg-hermes-cream hover:bg-white text-hermes-teal' : 'bg-hermes-dimmed/30 text-hermes-dimmed cursor-not-allowed'"
-              class="font-bold px-5 py-2 transition-all shadow-lg"
-            >
+          <div class="pd-modal__foot">
+            <button type="button" @click="showProjectModal = false" class="pd-btn">取消</button>
+            <button type="submit" :disabled="!commandValidation.valid"
+                    class="pd-btn pd-btn--solid" data-tone="accent">
               保存配置
             </button>
           </div>
-
         </form>
+      </div>
+    </div>
+
+    <!-- 自建对话框：替代原生 alert / confirm -->
+    <div v-if="dialog.open" class="pd-dialog-scrim" @click.self="dialogRespond(false)">
+      <div class="pd-dialog" :data-tone="dialog.tone"
+           role="alertdialog" aria-modal="true" :aria-label="dialog.title">
+        <div class="pd-dialog__head">
+          <div class="pd-dialog__icon">
+            <svg v-if="dialog.tone === 'danger' || dialog.tone === 'warn'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            <svg v-else-if="dialog.tone === 'ok'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+          <div class="pd-dialog__title">{{ dialog.title }}</div>
+        </div>
+        <div class="pd-dialog__text">{{ dialog.text }}</div>
+        <div class="pd-dialog__actions">
+          <button v-if="dialog.mode === 'confirm'" class="pd-btn" @click="dialogRespond(false)">
+            {{ dialog.cancelLabel }}
+          </button>
+          <button ref="dialogConfirmBtn" class="pd-btn pd-btn--solid"
+                  :data-tone="dialog.tone" @click="dialogRespond(true)">
+            {{ dialog.confirmLabel }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- toast 栈 -->
+    <div class="pd-toaster" aria-live="polite">
+      <div v-for="t in toasts" :key="t.id" class="pd-toast" :data-tone="t.tone">
+        <svg v-if="t.tone === 'ok'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <svg v-else-if="t.tone === 'danger' || t.tone === 'warn'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+        </svg>
+        <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <span class="pd-toast__msg pd-grow">{{ t.msg }}</span>
+        <button class="pd-toast__close" @click="dismissToast(t.id)" aria-label="关闭">×</button>
       </div>
     </div>
 
@@ -1614,6 +2687,53 @@ function applyTheme(themeId) {
         const stats = ref({});
         const loadingStates = reactive({});
         const snapshotLoading = ref(false);
+
+        /* ===== 自建对话框 + toast，取代原生 alert / confirm ===== */
+        const dialog = reactive({
+          open: false, mode: 'alert', tone: 'info',
+          title: '', text: '', confirmLabel: '确定', cancelLabel: '取消',
+        });
+        const dialogConfirmBtn = ref(null);
+        let dialogResolve = null;
+
+        const openDialog = (opts) => {
+          /* 先把上一个未决 promise 以 false 收掉，避免连点泄漏悬挂的 await */
+          if (dialogResolve) { dialogResolve(false); dialogResolve = null; }
+          Object.assign(dialog, {
+            open: true,
+            mode: opts.mode || 'alert',
+            tone: opts.tone || 'info',
+            title: opts.title || '提示',
+            text: opts.text || '',
+            confirmLabel: opts.confirmLabel || (opts.mode === 'confirm' ? '确认' : '知道了'),
+            cancelLabel: opts.cancelLabel || '取消',
+          });
+          nextTick(() => dialogConfirmBtn.value?.focus());
+          return new Promise((resolve) => { dialogResolve = resolve; });
+        };
+        const dialogRespond = (ok) => {
+          dialog.open = false;
+          const r = dialogResolve;
+          dialogResolve = null;
+          if (r) r(ok);
+        };
+        /* alert 的替代：只有一个确认键 */
+        const notifyDialog = (text, opts = {}) =>
+          openDialog({ mode: 'alert', text, ...opts });
+        /* confirm 的替代：返回 Promise<boolean> */
+        const confirmDialog = (text, opts = {}) =>
+          openDialog({ mode: 'confirm', tone: 'warn', title: '需要确认', text, ...opts });
+
+        const toasts = ref([]);
+        let toastSeq = 0;
+        const dismissToast = (id) => {
+          toasts.value = toasts.value.filter(t => t.id !== id);
+        };
+        const notify = (msg, tone = 'ok', ttl = 4200) => {
+          const id = ++toastSeq;
+          toasts.value = [...toasts.value.slice(-3), { id, msg, tone }];
+          setTimeout(() => dismissToast(id), ttl);
+        };
 
         const activeLogProject = ref(null);
         const logContent = ref('');
@@ -1667,13 +2787,23 @@ const defaultTabOptions = [
   { id: 'system',  label: '全局', desc: '全部端口' }
 ];
 
+/* 与后端 ALLOWED_CATEGORIES 保持一致：network / system 会被后端丢弃 */
+const defaultCategoryOptions = [
+  { id: 'all',      label: '全部' },
+  { id: 'user',     label: '用户' },
+  { id: 'creative', label: '创意' }
+];
+
+const currentThemeMeta = computed(() =>
+  themeList.find(t => t.id === currentTheme.value) || { label: currentTheme.value, swatch: '#888' });
+
 /* sidebar nav */
 const settingsSections = ref([
   { id: 'theme',      label: '主题',      sub: 'THEME',      icon: 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4z' },
   { id: 'appearance', label: '外观',      sub: 'APPEARANCE', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
   { id: 'refresh',    label: '刷新',      sub: 'REFRESH',    icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
   { id: 'defaults',   label: '默认视图',  sub: 'DEFAULTS',   icon: 'M4 6h16M4 12h16M4 18h7' },
-  { id: 'advanced',   label: '高级',      sub: 'ADVANCED',   icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.50 M15 12a3 3 0 11-6 0 3 3 0 016 0z' }
+  { id: 'advanced',   label: '高级',      sub: 'ADVANCED',   icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35 M15 12a3 3 0 11-6 0 3 3 0 016 0z' }
 ]);
 
 /* API helpers */
@@ -1687,7 +2817,7 @@ const savePreference = async (patch) => {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.requires_restart && data.message) {
-      alert(data.message);
+      notify(data.message, 'info');
     }
     return data;
   } catch (e) {
@@ -1695,6 +2825,9 @@ const savePreference = async (patch) => {
     return null;
   }
 };
+
+let prefsHydrated = false;
+let lastSavedPort = null;
 
 const fetchPreferences = async () => {
   try {
@@ -1710,13 +2843,27 @@ const fetchPreferences = async () => {
     if (typeof prefs.auto_refresh === 'boolean') autoRefresh.value = prefs.auto_refresh;
     if (typeof prefs.refresh_interval === 'number') refreshInterval.value = prefs.refresh_interval;
     if (typeof prefs.default_category === 'string') defaultCategory.value = prefs.default_category;
+    if (typeof prefs.default_tab === 'string') defaultTab.value = prefs.default_tab;
     if (typeof prefs.port === 'number') {
       dashboardPort.value = prefs.port;
       runningPort.value   = data.running_port ?? prefs.port;
+      lastSavedPort       = prefs.port;
+    }
+    /* 首次水合：把服务端默认值真正应用到当前视图。
+       localStorage 只用于首帧防闪，服务端值在这里胜出。 */
+    if (!prefsHydrated) {
+      prefsHydrated = true;
+      if (defaultTabOptions.some(o => o.id === defaultTab.value)) {
+        activeTab.value = defaultTab.value;
+      }
+      if (defaultCategoryOptions.some(o => o.id === defaultCategory.value)) {
+        localCategoryFilter.value = defaultCategory.value;
+      }
     }
     /* apply theme + crt side effects */
     applyTheme(currentTheme.value);
-    document.body.classList.toggle('crt-disabled', !crtEnabled.value);
+    setCrtEnabled(crtEnabled.value);
+    if (autoRefresh.value) startAutoRefresh(); else stopAutoRefresh();
   } catch (e) {
     console.error('Failed to fetch preferences:', e);
   }
@@ -1730,20 +2877,20 @@ const setTheme = (theme) => {
   savePreference({ theme });
 };
 
-/* CRT effects */
-const toggleCrtEffects = () => {
-  crtEnabled.value = !crtEnabled.value;
+/* CRT effects — 拆成"设值"与"翻转"，消除原先模板赋值后又取反一次的双重翻转 */
+const setCrtEnabled = (on) => {
+  crtEnabled.value = !!on;
   localStorage.setItem('crtEnabled', String(crtEnabled.value));
   document.body.classList.toggle('crt-disabled', !crtEnabled.value);
 };
+const toggleCrtEffects = () => setCrtEnabled(!crtEnabled.value);
 
-/* Refresh
- * NOTE: auto-refresh loop interval is currently fixed at 3000ms in startAutoRefresh().
- * We persist the preferred interval so future versions can honor it, but the live
- * loop stays unchanged to avoid touching behavior the user hasn't asked for. */
+/* Refresh */
 const setRefreshInterval = (sec) => {
+  if (!allowedRefreshIntervals.value.includes(sec)) return;
   refreshInterval.value = sec;
   savePreference({ refresh_interval: sec });
+  if (autoRefresh.value) startAutoRefresh();
 };
 
 /* Defaults */
@@ -1756,26 +2903,31 @@ const setDefaultTab = (tab) => {
   savePreference({ default_tab: tab });
 };
 
-/* Port */
+/* Port — 低位端口需要管理员权限，前端直接拒绝 */
+const PORT_MIN = 1024;
+const PORT_MAX = 65535;
 const saveDashboardPort = () => {
   const p = Number(dashboardPort.value);
-  if (!Number.isInteger(p) || p < 1 || p > 65535) {
-    alert('端口必须在 1-65535 之间');
+  if (!Number.isInteger(p) || p < PORT_MIN || p > PORT_MAX) {
+    notify(`端口必须是 ${PORT_MIN}-${PORT_MAX} 之间的整数（低位端口需要管理员权限）`, 'warn');
+    dashboardPort.value = runningPort.value;
     return;
   }
+  if (p === lastSavedPort) return;
+  lastSavedPort = p;
   savePreference({ port: p });
 };
 
 /* Reset all */
 const resetPreferences = async () => {
-  if (!confirm('确认要恢复所有设置为默认值吗？')) return;
+  if (!await confirmDialog('确认要把所有设置恢复为默认值吗？', { tone: 'danger', title: '恢复默认设置' })) return;
   try {
     /* GET defaults, then PUT each one back */
     const dRes = await fetch('/api/preferences');
     const data = await dRes.json();
     const d = data.defaults;
     if (!d) {
-      alert('无法读取默认值，请稍后重试');
+      notify('无法读取默认值，请稍后重试', 'danger');
       return;
     }
     await savePreference({
@@ -1783,16 +2935,18 @@ const resetPreferences = async () => {
       auto_refresh: d.auto_refresh,
       refresh_interval: d.refresh_interval,
       default_category: d.default_category,
+      default_tab: d.default_tab,
       port: d.port
     });
     /* refresh local state + clear overrides */
-    await fetchPreferences();
-    defaultTab.value = 'managed';
     localStorage.removeItem('theme');
-    localStorage.removeItem('crtEnabled');
+    localStorage.removeItem('localCategoryFilter');
+    setCrtEnabled(true);
+    prefsHydrated = false;
+    await fetchPreferences();
   } catch (e) {
     console.error('Failed to reset preferences:', e);
-    alert('恢复默认设置失败');
+    notify('恢复默认设置失败', 'danger');
   }
 };
 
@@ -1802,7 +2956,9 @@ const resetPreferences = async () => {
 
         const startAutoRefresh = () => {
           if (snapshotIntervalId) clearInterval(snapshotIntervalId);
-          snapshotIntervalId = setInterval(refreshDashboard, 3000);
+          const sec = allowedRefreshIntervals.value.includes(refreshInterval.value)
+            ? refreshInterval.value : 5;
+          snapshotIntervalId = setInterval(refreshDashboard, sec * 1000);
         };
 
         const stopAutoRefresh = () => {
@@ -1854,11 +3010,36 @@ const resetPreferences = async () => {
           return counts;
         });
 
+        /* 分类的标签与语义 tone 的单一来源。
+           模板原本重复了 5 个 pill 与 5 个徽章分支，其中 violet/blue 两组的
+           Tailwind 类在裁剪版里并不存在，一直是无色的。 */
+        const localCategoryOptions = [
+          { id: 'all',      label: '全部',     tone: 'accent' },
+          { id: 'user',     label: '我的应用', tone: 'ok' },
+          { id: 'creative', label: '创意软件', tone: 'creative' },
+          { id: 'network',  label: '网络工具', tone: 'network' },
+          { id: 'system',   label: '系统服务', tone: 'muted' },
+        ];
+        const categoryTone = (cat) =>
+          (localCategoryOptions.find(o => o.id === cat) || { tone: 'muted' }).tone;
+        const categoryLabel = (cat) => {
+          const hit = localCategoryOptions.find(o => o.id === cat && o.id !== 'all');
+          return hit ? hit.label : '';
+        };
+
         // Watch localCategoryFilter and persist to localStorage
         const toggleLocalCategory = (category) => {
           localCategoryFilter.value = category;
           localStorage.setItem('localCategoryFilter', category);
         };
+
+        /* 安全等级过滤项。颜色由 tone 承担，不再需要 emoji 前缀 */
+        const safetyFilterOptions = [
+          { id: 'all',     label: '全部', tone: 'accent' },
+          { id: 'safe',    label: '安全', tone: 'ok' },
+          { id: 'warning', label: '警告', tone: 'warn' },
+          { id: 'danger',  label: '极危', tone: 'danger' },
+        ];
 
         const safetyCounts = computed(() => {
           const counts = { safe: 0, warning: 0, danger: 0 };
@@ -1938,17 +3119,20 @@ const resetPreferences = async () => {
           if (proj.status === 'running') {
             return {
               label: '托管运行中',
+              tone: 'ok',
               class: 'text-emerald-300 border-emerald-500/40 bg-emerald-950/30'
             };
           }
           if (proj.status === 'external') {
             return {
               label: '外部运行中',
+              tone: 'info',
               class: 'text-sky-300 border-sky-500/40 bg-sky-950/30'
             };
           }
           return {
             label: '已停止',
+            tone: 'muted',
             class: 'text-stone-300 border-stone-500/30 bg-stone-900/20'
           };
         };
@@ -1965,13 +3149,14 @@ const resetPreferences = async () => {
         };
 
         const showExternalStateHelp = (proj) => {
-          alert(
-            `项目“${proj.name}”当前处于【外部运行中】状态。\n\n` +
+          notifyDialog(
+            `项目「${proj.name}」当前处于【外部运行中】状态。\n\n` +
             `端口 ${proj.port} 已被 ${proj.owner || '外部进程'} 占用，dashboard 可以识别它在运行，但不会把它当成“托管启动”的项目。\n\n` +
             `如果你想让它显示成【托管运行中】：\n` +
             `1. 先停止当前外部进程\n` +
             `2. 再回到 dashboard 点击“启动”\n\n` +
-            `如果你只是想访问页面，现在直接点“访问页面”就可以。`
+            `如果你只是想访问页面，现在直接点「访问页面」就可以。`,
+            { tone: 'info', title: '外部运行中是什么意思' }
           );
         };
 
@@ -1985,18 +3170,18 @@ const resetPreferences = async () => {
           const safety = getPortSafetyInfo(port, processName);
 
           if (safety.level === 'danger') {
-            alert(`⚠️ 【严禁强杀】\n\n该服务进程 [${processName}] (端口 ${port}) 被系统评估为【${safety.label}】级别！\n\n原因说明：\n${safety.desc}\n\n为了保障您的操作系统稳定性，本控制中心已硬编码拦截并禁用该终止操作！`);
+            notifyDialog(`该服务进程 [${processName}]（端口 ${port}）被评估为【${safety.label}】级别。\n\n原因说明：\n${safety.desc}\n\n为保障操作系统稳定性，本控制中心已硬编码拦截该终止操作。`, { tone: 'danger', title: '严禁强杀' });
             return;
           } else if (safety.level === 'warning') {
             if (safetyLock.value) {
-              alert(`🔒 【强杀已被安全锁拦截】\n\n服务进程 [${processName}] (端口 ${port}) 被系统评估为【${safety.label}】高危等级。\n\n原因说明：${safety.desc}\n\n为了避免误点击导致您的开发数据库或网络组网代理突然掉线，当前强杀已被拦截！\n\n💡【如何解锁？】\n若您确认需要强杀此进程，请先在控制台左上角将【高危安全锁】点击解锁！`);
+              notifyDialog(`服务进程 [${processName}]（端口 ${port}）被评估为【${safety.label}】高危等级。\n\n原因说明：${safety.desc}\n\n为避免误点击导致开发数据库或组网代理突然掉线，本次强杀已被拦截。\n\n如需继续，请先点击顶部的【高危安全锁】解锁。`, { tone: 'warn', title: '强杀已被安全锁拦截' });
               return;
             }
-            if (!confirm(`⚠️ 【警告：高危操作】\n\n您正在尝试强杀被评为【${safety.label}】级别的服务进程 [${processName}] (端口 ${port})。\n\n功能释义：\n${safety.desc}\n\n终止该服务可能会导致宿主机或其他依赖该服务的应用崩溃，您确定仍要继续终止它吗？`)) {
+            if (!await confirmDialog(`你正在强杀被评为【${safety.label}】级别的服务进程 [${processName}]（端口 ${port}）。\n\n功能释义：\n${safety.desc}\n\n终止该服务可能导致宿主机或依赖它的应用崩溃。确定继续吗？`, { tone: 'danger', title: '高危操作', confirmLabel: '仍要终止' })) {
               return;
             }
           } else {
-            if (!confirm(`确认要终止 PID ${pid} (运行于端口 ${port}) [${processName}] 的服务进程及其子进程吗？`)) {
+            if (!await confirmDialog(`确认终止 PID ${pid}（端口 ${port}）[${processName}] 及其全部子进程吗？`, { confirmLabel: '终止' })) {
               return;
             }
           }
@@ -2005,24 +3190,24 @@ const resetPreferences = async () => {
             const res = await fetch(`/api/system/ports/kill/${pid}?platform=${platform}`, { method: 'POST' });
             const data = await res.json();
             if (res.ok && data.success) {
-              alert(data.message || '进程终止成功！');
+              notify(data.message || '进程终止成功', 'ok');
               await refreshDashboard(true);
             } else {
-              alert(`强杀失败: ${data.detail || data.message || '未知错误'}`);
+              notify(`强杀失败：${data.detail || data.message || '未知错误'}`, 'danger');
             }
           } catch (e) {
-            alert(`强杀失败: ${e.message}`);
+            notify(`强杀失败：${e.message}`, 'danger');
           }
         };
 
-        const quickImportPort = (portObj) => {
+        const quickImportPort = async (portObj) => {
           const safety = getPortSafetyInfo(portObj.port, portObj.process);
           if (safety.level === 'warning' && safetyLock.value) {
-            alert(`🔒 【操作已被安全锁拦截】\n\n该服务 [${portObj.process}] (端口 ${portObj.port}) 被系统评估为【警告】等级！\n\n原因说明：${safety.desc}\n\n该服务通常是您宿主机的核心数据库或全局组网代理。直接在控制台对其进行生命周期重新托管，可能会因端口二次占用导致宿主机原有进程死锁、停止或崩溃。\n\n💡【如何解锁？】\n若您确认需要强行托管该端口，请先在控制台左上角将【高危安全锁】点击解锁！`);
+            notifyDialog(`该服务 [${portObj.process}]（端口 ${portObj.port}）被评估为【警告】等级。\n\n原因说明：${safety.desc}\n\n这类服务通常是核心数据库或全局组网代理。在面板中重新托管其生命周期，可能因端口二次占用导致原有进程死锁或崩溃。\n\n如需继续，请先点击顶部的【高危安全锁】解锁。`, { tone: 'warn', title: '操作已被安全锁拦截' });
             return;
           }
           if (safety.level === 'warning') {
-            if (!confirm(`⚠️ 【警告：高危导入】\n\n该进程服务 [${portObj.process}] (端口 ${portObj.port}) 属于警告级别系统级公共服务，强行托管其生命周期有二次占用导致死锁的风险！\n\n您确定仍然要在控制台导入并托管它吗？`)) {
+            if (!await confirmDialog(`[${portObj.process}]（端口 ${portObj.port}）属于警告级别的系统公共服务，强行托管其生命周期有二次占用导致死锁的风险。\n\n确定仍要导入并托管吗？`, { tone: 'danger', title: '高危导入', confirmLabel: '仍要导入' })) {
               return;
             }
           }
@@ -2064,12 +3249,12 @@ const resetPreferences = async () => {
 
         const saveProject = async () => {
           if (!form.id || (!form.sync_name && !form.name) || !form.cwd || !form.command || !form.port) {
-            alert('请完整填写所有必填字段！');
+            notify('请完整填写所有必填字段', 'warn');
             return;
           }
 
           if (!commandValidation.value.valid) {
-            alert(commandValidation.value.message);
+            notify(commandValidation.value.message, 'warn');
             return;
           }
 
@@ -2087,15 +3272,15 @@ const resetPreferences = async () => {
               await refreshDashboard(true);
             } else {
               const err = await res.json();
-              alert(`保存失败: ${err.detail || '未知错误'}`);
+              notify(`保存失败：${err.detail || '未知错误'}`, 'danger');
             }
           } catch (e) {
-            alert(`保存失败: ${e.message}`);
+            notify(`保存失败：${e.message}`, 'danger');
           }
         };
 
         const deleteProject = async (proj) => {
-          if (!confirm(`确认要将项目 “${proj.name}” 自托管控制中心删除吗？（注意：如果服务正在运行，删除时也会强行关闭服务）`)) {
+          if (!await confirmDialog(`确认把项目「${proj.name}」从托管控制中心删除吗？\n\n如果服务正在运行，删除时会一并强行关闭。`, { tone: 'danger', title: '删除托管项目', confirmLabel: '删除' })) {
             return;
           }
 
@@ -2108,10 +3293,10 @@ const resetPreferences = async () => {
               await refreshDashboard(true);
             } else {
               const err = await res.json();
-              alert(`删除失败: ${err.detail || '未知错误'}`);
+              notify(`删除失败：${err.detail || '未知错误'}`, 'danger');
             }
           } catch (e) {
-            alert(`删除失败: ${e.message}`);
+            notify(`删除失败：${e.message}`, 'danger');
           }
         };
 
@@ -2128,10 +3313,10 @@ const resetPreferences = async () => {
                 openLogsPanel(proj);
               }
             } else {
-              alert(`启动失败: ${data.detail || data.message || '未知错误'}`);
+              notify(`启动失败：${data.detail || data.message || '未知错误'}`, 'danger');
             }
           } catch (e) {
-            alert(`启动失败: ${e.message}`);
+            notify(`启动失败：${e.message}`, 'danger');
           } finally {
             loadingStates[projId] = false;
           }
@@ -2151,14 +3336,14 @@ const resetPreferences = async () => {
                 if (proj) {
                   showExternalStateHelp(proj);
                 } else {
-                  alert(data.message || '当前项目处于外部运行状态，dashboard 不会自动停止外部进程。');
+                  notify(data.message || '当前项目处于外部运行状态，面板不会自动停止外部进程', 'info');
                 }
               } else {
-                alert(`停止失败: ${data.detail || data.message || '未知错误'}`);
+                notify(`停止失败：${data.detail || data.message || '未知错误'}`, 'danger');
               }
             }
           } catch (e) {
-            alert(`停止失败: ${e.message}`);
+            notify(`停止失败：${e.message}`, 'danger');
           } finally {
             loadingStates[projId] = false;
           }
@@ -2236,12 +3421,35 @@ const resetPreferences = async () => {
         const copyLogs = () => {
           if (!logContent.value) return;
           navigator.clipboard.writeText(logContent.value)
-            .then(() => alert('日志已成功复制到系统剪切板！'))
-            .catch(err => alert('复制失败: ' + err));
+            .then(() => notify('日志已复制到剪贴板', 'ok'))
+            .catch(err => notify('复制失败：' + err, 'danger'));
         };
 
-        onMounted(() => {
-          fetchPreferences();
+        /* ESC 关闭 + ⌘, 打开。原先 @keydown.esc 挂在从未获焦的 div 上，
+           界面上的 ⌘, 提示也没有对应实现。 */
+        const onGlobalKey = (e) => {
+          /* 对话框优先级最高：打开时吞掉 Esc / Enter，不让它们落到设置面板 */
+          if (dialog.open) {
+            if (e.key === 'Escape') { e.preventDefault(); dialogRespond(false); }
+            else if (e.key === 'Enter') { e.preventDefault(); dialogRespond(true); }
+            return;
+          }
+          if (e.key === 'Escape' && showSettingsModal.value) {
+            showSettingsModal.value = false;
+            return;
+          }
+          if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+            e.preventDefault();
+            showSettingsModal.value = true;
+            activeSettingsSection.value = 'theme';
+          }
+        };
+
+        onMounted(async () => {
+          applyTheme(currentTheme.value);
+          setCrtEnabled(crtEnabled.value);
+          window.addEventListener('keydown', onGlobalKey);
+          await fetchPreferences();
           refreshDashboard(true);
           if (autoRefresh.value) {
             startAutoRefresh();
@@ -2249,6 +3457,7 @@ const resetPreferences = async () => {
         });
 
         onBeforeUnmount(() => {
+          window.removeEventListener('keydown', onGlobalKey);
           if (snapshotIntervalId) clearInterval(snapshotIntervalId);
           if (logIntervalId) clearInterval(logIntervalId);
         });
@@ -2289,6 +3498,7 @@ const resetPreferences = async () => {
 
           let level = 'safe';
           let label = '安全';
+          let tone = 'ok';
           let colorClass = 'text-emerald-400 bg-emerald-950/40 border-emerald-800/40';
           let baseDesc = '普通用户进程或网页开发服务。可以安全强杀终止，不会影响操作系统运行。';
 
@@ -2310,6 +3520,7 @@ const resetPreferences = async () => {
           if (isSystemCritical) {
             level = 'danger';
             label = '极危';
+            tone = 'danger';
             colorClass = 'text-rose-400 bg-rose-950/40 border-rose-800/40';
             baseDesc = '系统核心级网络组件。强杀会导致蓝屏死机、系统立即重启或网络功能瘫痪，严禁终止！';
           } else if (
@@ -2336,13 +3547,17 @@ const resetPreferences = async () => {
           ) {
             level = 'warning';
             label = '警告';
+            tone = 'warn';
             colorClass = 'text-amber-400 bg-amber-950/40 border-amber-800/40';
             baseDesc = '基础代理、虚拟化或数据库等系统公共服务。终止会导致相关软件无法使用，请确认是否继续。';
           }
 
+          /* 面板自身端口与普通 warning 同级但需要独立配色，
+             这也是 tone 单独记录、而不是由 level 推导出来的原因。 */
           if (p === 9229) {
             level = 'warning';
             label = '自卫';
+            tone = 'self';
             colorClass = 'text-cyan-400 bg-cyan-950/40 border-cyan-800/40';
             baseDesc = '当前端口控制面板本身！若将其强杀，网页会立即断开连接，需要重新启动服务。';
           }
@@ -2350,11 +3565,16 @@ const resetPreferences = async () => {
           const specificDesc = getPortExplanation(p, proc);
           const finalDesc = specificDesc ? `${specificDesc} (${baseDesc})` : baseDesc;
 
-          return { level, label, colorClass, desc: finalDesc };
+          return { level, label, tone, colorClass, desc: finalDesc };
         };
 
         return {
           activeTab,
+          dialog,
+          dialogConfirmBtn,
+          dialogRespond,
+          toasts,
+          dismissToast,
           projects,
           systemPorts,
           safetyFilter,
@@ -2364,8 +3584,12 @@ const resetPreferences = async () => {
           groupedLocalPorts,
           filteredLocalPorts,
           localCategoryCounts,
+          localCategoryOptions,
+          categoryTone,
+          categoryLabel,
           toggleLocalCategory,
           safetyCounts,
+          safetyFilterOptions,
           stats,
           loadingStates,
           commandValidation,
@@ -2406,18 +3630,24 @@ const resetPreferences = async () => {
           activeSettingsSection,
           settingsSections,
           currentTheme,
+          currentThemeMeta,
           crtEnabled,
           themeList,
-          themeLabels,
           defaultTabOptions,
+          defaultCategoryOptions,
+          defaultTab,
+          defaultCategory,
+          allowedRefreshIntervals,
+          preferencesDefaults,
           dashboardPort,
           runningPort,
           setTheme,
-                    toggleCrtEffects,
-                    setRefreshInterval,
-                    refreshInterval,
-                    setDefaultCategory,
-                    setDefaultTab,
+          setCrtEnabled,
+          toggleCrtEffects,
+          setRefreshInterval,
+          refreshInterval,
+          setDefaultCategory,
+          setDefaultTab,
           saveDashboardPort,
           savePreference,
           fetchPreferences,

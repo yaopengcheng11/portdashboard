@@ -1,260 +1,187 @@
 ---
-version: alpha
-name: Port Dashboard
-description: Cyberpunk CRT-terminal aesthetic for a local port control center — deep teal backgrounds, cream foregrounds, amber as the single high-emphasis accent.
-colors:
-  background: "#041c1c"
-  surface: "#062a2a"
-  surface-elevated: "#083232"
-  foreground: "#FFE6CB"
-  foreground-muted: "rgba(255, 230, 203, 0.55)"
-  foreground-dim: "rgba(255, 230, 203, 0.35)"
-  primary: "{colors.background}"
-  secondary: "{colors.foreground-muted}"
-  tertiary: "{colors.accent}"
-  neutral: "{colors.surface}"
-  on-primary: "{colors.foreground}"
-  on-tertiary: "{colors.on-accent}"
-  accent: "#FFBD38"
-  accent-glow: "rgba(255, 189, 56, 0.35)"
-  border: "rgba(255, 230, 203, 0.15)"
-  accent-glow-color: "#FFBD38"
-  border-strong: "rgba(255, 230, 203, 0.40)"
-  success: "#10B981"
-  info: "#0EA5E9"
-  warning: "#F59E0B"
-  danger: "#EF4444"
-  on-accent: "#1A0F00"
-typography:
-  display:
-    fontFamily: "JetBrains Mono"
-    fontSize: 1.5rem
-    fontWeight: 700
-    lineHeight: 1.2
-    letterSpacing: "0.05em"
-  h1:
-    fontFamily: "JetBrains Mono"
-    fontSize: 1.5rem
-    fontWeight: 700
-    lineHeight: 1.2
-    letterSpacing: "0.05em"
-  h2:
-    fontFamily: "JetBrains Mono"
-    fontSize: 1.125rem
-    fontWeight: 700
-    lineHeight: 1.25
-    letterSpacing: "0.04em"
-  body:
-    fontFamily: "system-ui"
-    fontSize: "0.875rem"
-    lineHeight: 1.5
-  body-mono:
-    fontFamily: "JetBrains Mono"
-    fontSize: "0.8125rem"
-    lineHeight: 1.45
-  label-caps:
-    fontFamily: "JetBrains Mono"
-    fontSize: "0.6875rem"
-    fontWeight: 700
-    letterSpacing: "0.10em"
-  metric-value:
-    fontFamily: "JetBrains Mono"
-    fontSize: "0.75rem"
-    fontWeight: 600
-    lineHeight: 1.3
-rounded:
-  none: 0
-  sm: 2px
-  md: 4px
-  lg: 6px
-  full: 9999px
-spacing:
-  xs: 4px
-  sm: 8px
-  md: 12px
-  lg: 16px
-  xl: 24px
-  2xl: 32px
-  3xl: 48px
-elevation:
-  glow-amber: "0 0 8px rgba(255, 189, 56, 0.45)"
-  glow-amber-lg: "0 0 16px rgba(255, 189, 56, 0.55)"
-  card-rest: "0 0 0 1px rgba(255, 230, 203, 0.08)"
-  card-hover: "0 0 0 1px rgba(255, 230, 203, 0.25)"
-components:
-  button-primary:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.on-accent}"
-    rounded: "{rounded.sm}"
-    padding: "8px 16px"
-    typography: "{typography.label-caps}"
-  button-ghost:
-    backgroundColor: "{colors.background}"
-    textColor: "{colors.foreground}"
-    rounded: "{rounded.sm}"
-    padding: "8px 16px"
-    typography: "{typography.label-caps}"
-  button-ghost-active:
-    backgroundColor: "{colors.foreground}"
-    textColor: "{colors.background}"
-    rounded: "{rounded.sm}"
-    padding: "8px 16px"
-    typography: "{typography.label-caps}"
-  tab-inactive:
-    backgroundColor: "{colors.background}"
-    textColor: "{colors.foreground}"
-    rounded: "{rounded.sm}"
-    padding: "8px 16px"
-    typography: "{typography.label-caps}"
-  tab-active:
-    backgroundColor: "{colors.foreground}"
-    textColor: "{colors.background}"
-    rounded: "{rounded.sm}"
-    padding: "8px 16px"
-    typography: "{typography.label-caps}"
-  card-surface:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.foreground}"
-    rounded: "{rounded.md}"
-    padding: "16px"
-  card-status-running:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.success}"
-    rounded: "{rounded.md}"
-    padding: "12px"
-  card-status-external:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.info}"
-    rounded: "{rounded.md}"
-    padding: "12px"
-  card-status-warning:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.warning}"
-    rounded: "{rounded.md}"
-    padding: "12px"
-  card-status-danger:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.foreground}"
-    rounded: "{rounded.md}"
-    padding: "12px"
-  badge-label:
-    backgroundColor: "{colors.background}"
-    textColor: "{colors.accent}"
-    rounded: "{rounded.sm}"
-    padding: "2px 6px"
-    typography: "{typography.label-caps}"
-  metric-row:
-    backgroundColor: "{colors.background}"
-    textColor: "{colors.foreground-muted}"
-    rounded: "{rounded.sm}"
-    padding: "8px 12px"
-  metric-row-elevated:
-    backgroundColor: "{colors.surface-elevated}"
-    textColor: "{colors.foreground-muted}"
-    rounded: "{rounded.sm}"
-    padding: "8px 12px"
-  input-field:
-    backgroundColor: "{colors.background}"
-    textColor: "{colors.foreground}"
-    rounded: "{rounded.sm}"
-    padding: "8px 12px"
-  input-field-focused:
-    backgroundColor: "{colors.background}"
-    textColor: "{colors.accent}"
-    rounded: "{rounded.sm}"
-    padding: "8px 12px"
-  glow-indicator:
-    backgroundColor: "{colors.accent-glow-color}"
-    textColor: "{colors.foreground}"
-    rounded: "{rounded.full}"
-    padding: "8px"
+version: 2
+supersedes: v1 (见文末「v1 → v2 废弃对照表」)
+implementation: templates/index.html — 三个 <style> 块：pd-tokens / pd-base / pd-ui
 ---
+
+# Port Dashboard 设计规范 v2
 
 ## Overview
 
-Port Dashboard is a local control panel for developers running multiple services on one machine.
-The interface reads like a **CRT terminal from an alternate-1985**: deep teal backgrounds,
-warm cream foregrounds, a single amber accent driving every interactive signal.
-The mood is calm-but-alert — a ship engineer's console, not a marketing landing page.
-Every affordance is mono-spaced and uppercase to reinforce that this is an **engine room**, not a product UI.
+Port Dashboard 是给同机跑多个服务的开发者用的本地控制台。视觉基调仍是
+**复古 CRT 终端**：等宽字体、hairline 边框、扫描线与环境弧光。但 v2 把
+"单一琥珀强调色 + 固定深绿色板"扩展成了**七套主题 + 八个语义 tone**，
+因为四个安全等级加五个进程分类无法用一种色相表达。
 
-## Colors
+气质仍是"冷静但警觉的机舱控制台"，不是营销落地页。
 
-- **Background ({colors.background}):** Deep ink-teal. The page itself. Never use pure black —
-  the slight green shift is what gives the cream foregrounds their phosphor-glow quality.
-- **Surface ({colors.surface}):** One step lighter than background. Default card / panel fill.
-- **Foreground ({colors.foreground}):** Cream. Headlines, body text, primary content. Never white —
-  cream is warmer on the eyes against deep teal and reads as "vintage phosphor."
-- **Accent ({colors.tertiary} = {colors.accent}):** **Amber. The only high-emphasis color in the system.**
-  Use for: primary buttons, active-tab fill, focused-input caret, critical status indicators,
-  the brand mark "P". If something is amber, the user can act on it.
-- **Success ({colors.success}) / Info ({colors.info}) / Warning ({colors.warning}) / Danger ({colors.danger}):**
-  Reserved exclusively for **process-status dots and text** in the port list.
-  Never use these for buttons or typography.
-- **Border ({colors.border}) / Border-strong ({colors.border-strong}):** Hairline card and divider
-  borders. 15% / 40% opacity over the cream foreground — these read as "edge of phosphor"
-  rather than "drawn line".
+## 1. 主题模型（8 变量契约）
 
-## Typography
+`THEME_VARIABLES`（index.html）为每套主题提供**且仅提供** 8 个变量：
 
-Two families, strict roles:
+| 变量 | 含义 |
+|---|---|
+| `--background` | 页面底色 |
+| `--midground` | 主前景（文字、边框推导源） |
+| `--card-bg` | 卡片/面板底 |
+| `--card-border` | 兼容保留，新代码用 `--st-line` 系列 |
+| `--glow-color` | 环境弧光（半透明） |
+| `--accent` | 不透明强调色 |
+| `--dimmed` | 次级文字色 |
+| `--label` | 仅供设置面板展示，不写入 DOM |
 
-- **JetBrains Mono** — every headline, label, metric, button, tab, and code-adjacent element.
-  The mono spacing creates the "control panel" feel and prevents UI labels from competing
-  with running logs.
-- **system-ui** — body prose only (descriptions, helper text). Keep usage under ~20% of
-  the page; if a block is mostly prose, consider whether it belongs in a modal.
+`applyTheme()` 把它们写到 `<html>` 的 inline style，并设 `body.dataset.theme`。
 
-`label-caps` is the workhorse: every button, every tab, every status badge uses it.
-`tracking-wider` / `tracking-widest` are encouraged on display text — they mimic the
-stretched phosphor of a vintage terminal.
+**铁律：token 块之外不写十六进制色值。**要新颜色就用 `color-mix()` 从这 8 个变量推导，
+或在 `body[data-theme=...]` 里加逐主题覆写。
 
-## Layout
+七套主题：`dark-emerald`（默认）/ `blueprint` / `midnight` / `arctic`（唯一亮底）/
+`terra` / `neon` / `velvet`。
 
-Spacing follows an 8px grid; the design tolerates 12px (`md`) and 4px (`xs`) where
-density matters (status rows, metric cells). Section breaks always use `xl` (24px) or
-`2xl` (32px). Page max-width is implicit — the dashboard fills the viewport, no centered
-container, because this is a workspace, not a doc.
+## 2. 颜色角色
 
-## Elevation & Depth
+从 8 个源变量派生出的 `--st-*` 层：
 
-There are **no shadows**. Depth is built from:
+- **三级表面**：`--st-surface`（内容区）< `--st-surface-2`（侧栏/header/footer）<
+  `--st-surface-3`（输入、分段、hover）
+  **两个混色操作数都必须不透明。**半透明表面会让环境弧光透上来并破坏对比度 ——
+  这是设置面板改造中最重要的一条教训。
+- **三级线**：`--st-line`(14%) / `--st-line-soft`(8%) / `--st-line-strong`(26%)，
+  全部由 `--midground` 推导。绝不依赖任何框架的默认边框色。
+- **三级文字**：`--st-fg` / `--st-fg-2`(=`--dimmed`) / `--st-fg-3`
+- **强调阶梯**：`--st-accent` / `-weak`(12%) / `-soft`(22%) / `--st-ring`(45%)，
+  以及 `--st-accent-fg`（叠在强调填充上的文字色，逐主题校准）
 
-1. Border-only cards (`card-rest` → `card-hover`) — the border brightens, never the fill.
-2. The amber glow token (`glow-amber`, `glow-amber-lg`) — applied to the brand mark,
-   the active CPU/RAM bar fill, and any element that is *currently* the user's focus.
-3. A fixed ambient radial-glow at the top of the viewport (`accent-glow` at 35%) —
-   set once in the root layout, never per-card.
+## 3. tone 契约
 
-## Shapes
+**组件永远不指定颜色，只声明 tone。** 这是 v2 最核心的约束。
 
-Corners are **sharp or barely rounded**. Use `none` (0px) and `sm` (2px) on buttons,
-tabs, inputs, and badges — they should read as engineered panels, not soft cards.
-`md` (4px) is the ceiling for any rounded surface. `full` is reserved for status
-indicator dots only.
+```html
+<span class="pd-badge" data-tone="danger">极危</span>
+<button class="pd-btn pd-btn--solid" data-tone="ok">启动</button>
+```
 
-## Components
+组件 CSS 只消费 `--tone` 与 `--tone-fg`；`[data-tone="x"]` 负责解析成具体色值。
 
-- **`button-primary`** is the only high-emphasis action on a screen. **At most one per view.**
-  Amber fill, dark text. Reserve for "the thing the user came here to do" (Save, Start, Confirm).
-- **`tab-active`** and **`tab-inactive`** use inverted contrast (cream fill / teal text → transparent / cream text).
-  Active tab is the only filled tab. Inactive tabs never glow.
-- **`card-surface`** is the default. **`card-status-running`**, **`-external`**, **`-warning`**, **`-danger`**
-  swap the foreground color to indicate process state. The border remains the standard `border` token;
-  state is communicated through the dot/badge, not a colored border.
-- **`badge-label`** is the small uppercase pill used on the title-bar platform chip
-  ("Windows Engine"), status filters, and security levels.
-- **`metric-row`** is the label-value pair used for CPU%, memory%, uptime, IP. **`metric-row-elevated`**
-  swaps to a slightly lighter fill for the currently-focused stat row.
-- **`input-field` / `input-field-focused`** — focus state swaps textColor to `accent`.
-- **`divider-strong` / `divider-soft`** — 1px-tall strips used as section separators.
+八个 tone 及其语义：
 
-## Do's and Don'ts
+| tone | 用于 |
+|---|---|
+| `ok` | 进程健康、HTTP 服务、我的应用、启动键 |
+| `info` | 外部占用、说明性对话框 |
+| `warn` | 需要确认、警告级端口 |
+| `danger` | 禁止操作、失败、强杀/删除键 |
+| `self` | 面板自身端口（与 warn 同级但需独立配色） |
+| `creative` | 创意软件分类 |
+| `network` | 网络工具分类 |
+| `muted` | 已停止、系统服务 |
+| `accent` | 主行动，等同主题强调色 |
 
-- **Do** use `{colors.accent}` for every interactive signal — buttons, active tab, focused input, focused dot.
-- **Do** keep all labels uppercase with `label-caps` typography.
-- **Do** use mono (`body-mono`) for any value the user will compare across rows (ports, PIDs, memory MB).
-- **Don't** introduce a second accent color. If you need another emphasis, adjust opacity of `accent` or `foreground`.
-- **Don't** use shadows. If you need depth, brighten the border or add the amber glow.
-- **Don't** round corners above `md` (4px). The sharp aesthetic is the brand.
-- **Don't** put prose in `system-ui` on more than ~20% of any view — this is a workspace, not a reader.
+未声明 tone 时退化为强调色。该回退规则**必须包在 `:where()` 里**把特异度归零 ——
+否则它与 `[data-tone]` 同为 (0,1,0) 且写在后面，会反过来盖掉所有 tone。
+（这个 bug 真实发生过：所有按钮一度都变成琥珀色。）
+
+**arctic 与 neon 需要逐主题校准**：arctic 是亮底，tone 既要当浅底上的文字色就必须压暗；
+neon 全站单色绿，tone 收进绿/黄谱系以免彩色徽章破坏主题识别度。
+
+## 4. 字体
+
+两个家族，角色严格：
+
+- `--font-mono`：**JetBrains Mono**，本地托管 latin 子集（`static/fonts/*.woff2`，
+  各约 21KB，`font-display: swap`）。用于所有数据、端口号、命令、日志、按钮、徽章。
+- `--font-sans`：系统 UI 栈。仅用于长段落说明文字。
+
+> v1 规范同样要求 JetBrains Mono，但项目里从来没有 `@font-face` 也没有字体文件，
+> 全站一直静默回退到系统等宽。v2 真正把它装上了。
+
+字号层级：品牌标题 22 / 分区标题 19 / 弹窗标题 15 / 卡片标题 15 / 行标题 13 /
+正文 11.5 / 说明 11 / 徽章与 eyebrow 10。
+
+## 5. 间距与圆角
+
+- **间距**：8px 基准，`--st-1`…`--st-7` = 4/8/12/16/20/24/28
+- **圆角阶梯**：modal 16 → icon/卡片 12 → 卡片·分段·主题行 10 → nav·按钮·输入 8 →
+  swatch 6 → pill 999
+- **容纳规则**：容器圆角 ≥ 子元素圆角 + 内边距
+
+> **明确废止 v1 的「4px 是圆角上限」。** 设置面板验证了更柔和的阶梯观感更好，
+> 而"工程控制台"的识别度由等宽字体与 hairline 边框承担，不依赖尖角。
+
+## 6. 深度
+
+**明确废止 v1 的「禁用阴影」。** 表面改为不透明后，原先靠半透明暗示的层次消失了，
+需要用阴影补回来：
+
+- `--st-shadow-sm`：静置卡片、面板、指标格
+- `--st-shadow`：浮层（弹窗、对话框、toast）
+- `--st-glow`：focus 环、品牌标记、激活态
+
+## 7. 交互三态
+
+| 组件 | hover | 激活/选中 | focus-visible |
+|---|---|---|---|
+| tab | `surface-3` 底 | `accent` 填充 + `accent-fg` 字 + glow | 3px ring |
+| pill | `tone` 16% 淡底 | `tone` 填充 + `tone-fg` 字 | 3px ring |
+| 卡片 | `tone` 45% 描边 | 左侧 3px `tone` 色轨 | — |
+| btn | `surface-2` | — | 3px ring |
+| btn--tone | 反相为 `tone` 实填充 | — | 3px ring |
+| btn--solid | `brightness(1.08)` | 按下回落 | 3px ring |
+
+## 8. 布局原语
+
+- `.pd-app` → `.pd-main`（≥1280px 为 12 栅格，`.pd-col-main` 8 / `.pd-col-side` 4）
+- **三段式高度收敛链**：`.pd-pane`(min-height:0) → `.pd-scroll`(flex:1 + min-height:0)。
+  `min-height: 0` 生效时完全不可见、缺失时整条链崩塌，是最容易回归的地方。
+- 行与栈：`.pd-row` / `.pd-stack` / `.pd-grow`（含 `min-width:0`，truncate 才会生效）
+
+**硬规则：不提供数值型间距 utility。**间距归属于组件，否则就是在重建一套 Tailwind。
+
+## 9. 效果层
+
+CRT 扫描线、磨砂噪点、环境弧光全部保留，但颜色与强度由 token 驱动：
+`--crt-opacity` / `--crt-stripe` / `--crt-blend` / `--noise-opacity` / `--noise-blend`。
+
+arctic 亮底需要特殊处理：深色扫描线叠白底会发灰脏，因此降低强度并改用 `multiply` 混合。
+
+> **CRT 开关的特异度契约**：`body.crt-disabled.crt-overlay::after` 靠 (0,2,1) 压制
+> (0,1,1) 的 `.crt-overlay::after`。**不要"简化"成单类选择器** —— 那会让开关静默失效
+> （已经坏过一次）。
+
+## 10. 无障碍
+
+- 每一对 `tone` / `tone-fg` 组合都必须 ≥ 4.5:1。`tests/verify_ui.py` 会逐主题断言。
+- 逐主题覆写只允许改 `--st-*` / `--tone-*`，**绝不触碰那 8 个源变量**。
+- 对话框：`role="alertdialog"`，焦点落确认键，Esc 取消（resolve false）、Enter 确认。
+- 所有可聚焦元素都有 3px 强调色焦点环。
+
+## 11. Do / Don't
+
+**Do**
+- 从 8 个源变量派生所有颜色
+- 任何有多种配色变体的组件都用 `data-tone`
+- 新 CSS 一律放 `<head>` 的三个 `<style>` 块里
+
+**Don't**
+- token 块与 `body[data-theme]` 之外写十六进制色值
+- 用 `color-mix(..., transparent)` 生成**表面**（只能用于线与叠在已知表面上的淡色）
+- 新增数值型间距 utility
+- 引用 `hermes-*`、`retro-border`、`glow-active`、`terminal-output` 或任何 Tailwind 类
+  —— 这些已全部移除
+
+> **为什么模板里的 `<style>` 必须放 `<head>`**：Vue 会把模板内的 `<style>` 当作副作用标签忽略，
+> CSS 会静默失效。这个坑踩过一次，`tests/verify_ui.py` 里有固化断言。
+
+## v1 → v2 废弃对照表
+
+保留而非删除，以便追溯。
+
+| v1 规则 | 状态 | 原因 |
+|---|---|---|
+| 圆角上限 `md`(4px) | **废止**，改为 6–16px 阶梯 | 设置面板验证柔和阶梯观感更好；工程识别度由等宽字体 + hairline 承担 |
+| "There are no shadows" | **废止**，改为两级阴影 + glow | 表面改不透明后失去了半透明带来的层次暗示 |
+| "琥珀是唯一强调色" | **废止**，改为 8 tone 体系 | 4 个安全等级 + 5 个分类无法用一种色相编码；琥珀仍是唯一**交互**强调色 |
+| 固定色板 `#041c1c`/`#FFE6CB`/`#FFBD38` | **废止**，改为 7 主题 | 色板现在是一套主题，不是规范本身 |
+| success/info/warning/danger "绝不用于按钮" | **废止** | 启动/关闭/强杀按钮按设计就该由 tone 驱动 |
+| 要求 JetBrains Mono | **保留并真正实现** | v1 只写了规范，既无 `@font-face` 也无字体文件 |
+| `tracking-widest` | **移除** | 属于 Tailwind 词汇，已不再依赖该框架 |
