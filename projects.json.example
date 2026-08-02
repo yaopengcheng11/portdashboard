@@ -1,0 +1,24 @@
+[
+  {
+    "id": "my-vite-app",
+    "name": "My Vite App",
+    "cwd": "<REPLACE_WITH_PROJECT_DIR>",
+    "command": "npm run dev",
+    "port": 5173,
+    "description": "Vite + React 项目示例。Windows 用 G:/AITOOLS/xxx；Linux/macOS 用 /home/you/xxx 或 ~/xxx。",
+    "sync_name": false,
+    "startup_timeout_sec": 30,
+    "health_check_url": "http://127.0.0.1:5173/"
+  },
+  {
+    "id": "my-fastapi",
+    "name": "My FastAPI Service",
+    "cwd": "<REPLACE_WITH_PROJECT_DIR>",
+    "command": "python -m uvicorn server:app --host 127.0.0.1 --port 8000",
+    "port": 8000,
+    "description": "FastAPI 服务示例。venv 用户可写 .venv/Scripts/python.exe -m uvicorn ... (Windows) 或 .venv/bin/python -m uvicorn ... (Unix)。",
+    "sync_name": false,
+    "startup_timeout_sec": 30,
+    "health_check_url": "http://127.0.0.1:8000/"
+  }
+]

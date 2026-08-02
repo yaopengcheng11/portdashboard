@@ -6,6 +6,7 @@ logs/*.log
 running_pids.json
 .hermes/
 mydashboard-config.json
+projects.json                # user-specific: 每个开发者的 cwd / command / port 都不同
 projects.json.bak-*
 projects.json.pre-pull-backup
 running_pids.json.pre-pull-backup

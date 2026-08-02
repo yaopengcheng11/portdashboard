@@ -79,7 +79,9 @@
 |------|---------|---------|---------|
 | **Windows** | ✅ 完整 | `netstat -ano` + `tasklist` | `taskkill /F /T` |
 | **Linux**   | ✅ 完整 | `netstat -tlnp` + psutil | `killpg` + SIGTERM/kill |
-| **macOS**   | ✅ 完整 | `netstat -lnp` + psutil | `killpg` + SIGTERM/kill |
+| **macOS**   | ✅ 完整 | `psutil.net_connections("tcp")` 逐进程枚举 | `killpg` + SIGTERM/kill |
+
+> macOS 备注：`netstat -p` 在 macOS 上是 protocol 参数而非显示 PID，且输出以 `.` 分隔地址 —— 旧实现因此净空，v2026.08-2 起统一走 psutil。
 
 ---
 
@@ -160,6 +162,8 @@ start.bat dev      # 开发模式（热重载）
 ```
 
 访问 **http://localhost:9229/**
+
+> 首次启动 `projects.json` 不存在（仓库不携带个人配置），可通过 UI 的「新建项目」按钮添加；或复制 [`projects.json.example`](./projects.json.example) 改写路径后启动。
 
 ---
 
@@ -405,6 +409,21 @@ MIT License
 ---
 
 ## 更新日志
+
+### v2026.07-4 — 安全收紧 + 快照去重
+
+**安全:**
+- 🔒 **默认绑定 loopback (`127.0.0.1`)** —— 之前无条件 `0.0.0.0`，意味着同 LAN 的任何主机都能访问未鉴权的管理 API。需要对外暴露时显式设环境变量 `MYDASHBOARD_HOST=0.0.0.0` 才生效
+- 🔒 **CORS 白名单收紧** —— 之前把每个活动本地端口都加进 CORS allowlist（任何本地页面都可带 cookie 跨域调用），现在只放行面板自身的 origin（`http://localhost:<port>` + `http://127.0.0.1:<port>`）
+
+**性能 / 隐性 bug:**
+- ⚡ HTTP 探测 + PID → 进程名推断做 TTL 缓存（之前每次刷新都重探测每个端口 + 重读元数据 + 每个 PID 组起线程池）
+- ⚡ `running_pids.json` 一次刷新只写一次（之前每组都写）
+- 🐛 **修复 `RUNNING_PORT` 永远是 `None`** —— uvicorn 重新 import 模块，`if __name__ == "__main__":` 块里的赋值永远不会到达请求路径。改为在 FastAPI app 启动时显式设置
+- ⚡ 启动等待改为 async —— 慢的 health check 不会再 pin 死 worker
+
+**验证:**
+- ✅ `tests/test_app.py` 新增 92 行覆盖上述修复（loopback 绑定 / CORS allowlist / 缓存去重 / 启动异步）
 
 ### v2026.08 — 全站自包含设计系统 + 移除 Tailwind
 
