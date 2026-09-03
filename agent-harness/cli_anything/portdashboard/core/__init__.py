@@ -28,8 +28,15 @@ def api_get(path: str, params: Optional[Dict] = None) -> Any:
     _ensure_requests()
     url = f"{get_base_url()}{path}"
     try:
-        resp = requests.get(url, params=params, timeout=5)
-        resp.raise_for_status()
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code >= 400:
+            detail = ""
+            try:
+                detail = resp.json().get("detail", resp.text)
+            except Exception:
+                detail = resp.text
+            print(f"Error ({resp.status_code}): {detail}", file=sys.stderr)
+            sys.exit(1)
         return resp.json()
     except requests.ConnectionError:
         print(f"Error: Cannot connect to Port Dashboard at {get_base_url()}", file=sys.stderr)

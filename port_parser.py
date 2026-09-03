@@ -25,6 +25,12 @@ IS_WINDOWS = sys.platform == "win32"
 _SUBPROCESS_TIMEOUT = 3.0
 
 
+def _console_encoding() -> str:
+    """tasklist/netstat 输出用的是 OEM 代码页：中文 Windows 是 GBK/CP936，
+    按 utf-8 解码会把非 ASCII 进程名吃掉（errors='ignore' 静默丢字节）。"""
+    return "mbcs" if IS_WINDOWS else "utf-8"
+
+
 def build_pid_name_map() -> Dict[int, str]:
     """Return ``{pid: process_name}`` for the current OS.
 
@@ -42,7 +48,7 @@ def _pid_map_from_tasklist() -> Dict[int, str]:
         ["tasklist", "/FO", "CSV", "/NH"],
         capture_output=True,
         text=True,
-        encoding="utf-8",
+        encoding=_console_encoding(),
         errors="ignore",
         timeout=_SUBPROCESS_TIMEOUT,
     )
@@ -93,7 +99,7 @@ def _parse_windows_listening(pid_to_name: Dict[int, str]) -> List[dict]:
         ["netstat", "-ano"],
         capture_output=True,
         text=True,
-        encoding="utf-8",
+        encoding=_console_encoding(),
         errors="ignore",
         timeout=_SUBPROCESS_TIMEOUT,
     )

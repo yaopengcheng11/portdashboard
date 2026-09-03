@@ -1865,6 +1865,22 @@ function applyTheme(themeId) {
                 刷新
               </button>
               <button
+                @click="openScenesModal()"
+                class="pd-btn pd-btn--sm"
+                title="场景：按依赖顺序一键启停一组项目"
+              >
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                场景
+              </button>
+              <button
+                @click="openDiscoverModal()"
+                class="pd-btn pd-btn--sm"
+                title="扫描目录，批量发现可托管的项目"
+              >
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                扫描导入
+              </button>
+              <button
                 @click="openAddProjectModal()"
                 class="pd-btn pd-btn--solid pd-btn--sm"
                 data-tone="accent"
@@ -2595,7 +2611,7 @@ function applyTheme(themeId) {
               <div class="pd-field">
                 <label class="pd-label">工作目录绝对路径 (Working Directory)</label>
                 <input v-model="form.cwd" type="text" required
-                       placeholder="e.g. /Users/me/projects/my-app" class="pd-input">
+                       placeholder="e.g. G:/projects/my-app 或 /Users/me/projects/my-app" class="pd-input">
                 <p class="pd-field__note">项目根目录的绝对路径，启动命令会在这里执行。</p>
               </div>
 
@@ -2609,6 +2625,18 @@ function applyTheme(themeId) {
                 <p v-if="commandValidation.message" class="pd-field__note"
                    :class="commandValidation.valid ? '' : 'pd-field__note--error'">
                   {{ commandValidation.message }}
+                </p>
+              </div>
+
+              <!-- 看护：意外退出自动重启 -->
+              <div class="pd-field">
+                <label class="pd-check">
+                  <input v-model="form.auto_restart" type="checkbox">
+                  意外退出时自动重启（看护）
+                </label>
+                <p class="pd-field__note">
+                  面板会监视该项目的进程，一旦崩溃或被误杀就自动拉起（失败按 5–60 秒退避重试）。
+                  手动「停止」不会触发重启。
                 </p>
               </div>
 
@@ -2632,6 +2660,152 @@ function applyTheme(themeId) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- 弹窗：扫描目录批量导入 -->
+    <div v-if="showDiscoverModal" class="pd-scrim">
+      <div class="pd-modal" role="dialog" aria-modal="true">
+        <div class="pd-modal__head">
+          <h3 class="pd-modal__title">扫描目录 · 批量导入托管项目</h3>
+          <button @click="showDiscoverModal = false" class="pd-btn pd-btn--ghost pd-btn--icon" aria-label="关闭">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6L6 18"></path>
+            </svg>
+          </button>
+        </div>
+
+        <div class="pd-modal__body">
+          <div class="pd-form">
+            <div class="pd-field">
+              <label class="pd-label">扫描根目录</label>
+              <div class="pd-row">
+                <input v-model="discoverRoot" class="pd-input pd-grow" type="text"
+                       placeholder="e.g. G:/AITOOLS" @keyup.enter="runDiscovery()">
+                <button @click="runDiscovery()" :disabled="discovering || !discoverRoot"
+                        class="pd-btn pd-btn--solid" data-tone="accent" style="flex:none;">
+                  {{ discovering ? '扫描中…' : '扫描' }}
+                </button>
+              </div>
+              <p v-if="discoverError" class="pd-field__note pd-field__note--error">{{ discoverError }}</p>
+              <p v-else class="pd-field__note">
+                识别 package.json（dev/start script）与带 Web 依赖的 Python 入口；端口从 .env、vite/next/nuxt 配置或脚本参数推断，导入前可修改。
+              </p>
+            </div>
+
+            <div v-if="discoverCandidates.length" class="pd-stack">
+              <div v-for="c in discoverCandidates" :key="c.cwd" class="pd-row"
+                   style="align-items:center; gap:10px; padding:7px 10px; border:1px solid var(--st-line-soft); border-radius:8px;">
+                <input type="checkbox" :checked="discoverSelection[c.cwd]"
+                       :disabled="c.already_managed || !canImportCandidate(c)"
+                       @change="toggleDiscoverCandidate(c)">
+                <div class="pd-grow" style="min-width:0;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <strong style="font-size:12px;">{{ c.name }}</strong>
+                    <span class="pd-badge" data-tone="info">{{ c.kind }}</span>
+                    <span v-if="c.already_managed" class="pd-badge" data-tone="muted">已在管</span>
+                    <span v-else-if="!canImportCandidate(c)" class="pd-badge" data-tone="warn">需补全端口/命令</span>
+                    <span v-if="c.port_source" class="pd-badge" data-tone="muted">{{ c.port_source }}</span>
+                  </div>
+                  <div style="font-size:11px; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.cwd }}</div>
+                </div>
+                <input v-model="c.command" class="pd-input" style="width:170px; flex:none;"
+                       :disabled="c.already_managed" aria-label="启动命令">
+                <input v-model.number="c.port" type="number" class="pd-input" style="width:82px; flex:none;"
+                       :disabled="c.already_managed" placeholder="端口" aria-label="端口">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pd-modal__foot">
+          <span class="pd-field__note" style="margin-right:auto;">
+            {{ discoverSelectedCount }} 个已选
+          </span>
+          <button type="button" @click="showDiscoverModal = false" class="pd-btn">取消</button>
+          <button type="button" @click="importDiscovered()" :disabled="!discoverSelectedCount"
+                  class="pd-btn pd-btn--solid" data-tone="accent">
+            导入所选
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 弹窗：场景（按依赖顺序批量启停） -->
+    <div v-if="showScenesModal" class="pd-scrim">
+      <div class="pd-modal" role="dialog" aria-modal="true">
+        <div class="pd-modal__head">
+          <h3 class="pd-modal__title">场景 · 一键启动组合</h3>
+          <button @click="showScenesModal = false" class="pd-btn pd-btn--ghost pd-btn--icon" aria-label="关闭">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6L6 18"></path>
+            </svg>
+          </button>
+        </div>
+
+        <div class="pd-modal__body">
+          <div class="pd-form">
+            <p v-if="!scenes.length" class="pd-field__note">
+              还没有场景。在下方创建一个：选好项目、按依赖顺序添加（后端在前），之后一键整组启停。
+            </p>
+
+            <div v-for="sc in scenes" :key="sc.id" class="pd-row"
+                 style="align-items:center; gap:10px; padding:7px 10px; border:1px solid var(--st-line-soft); border-radius:8px;">
+              <div class="pd-grow" style="min-width:0;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <strong style="font-size:12px;">{{ sc.name }}</strong>
+                  <span class="pd-badge"
+                        :data-tone="sc.total && sc.up_count === sc.total ? 'ok' : (sc.up_count ? 'warn' : 'muted')">
+                    {{ sc.up_count }}/{{ sc.total }} 运行中
+                  </span>
+                </div>
+                <div style="font-size:11px; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  {{ sc.steps.map(s => s.name).join(' → ') }}
+                </div>
+              </div>
+              <button class="pd-btn pd-btn--sm" data-tone="ok" style="flex:none;"
+                      :disabled="scenesBusy === sc.id || (sc.total > 0 && sc.up_count === sc.total)"
+                      @click="runScene(sc, 'start')">启动</button>
+              <button class="pd-btn pd-btn--sm" data-tone="danger" style="flex:none;"
+                      :disabled="scenesBusy === sc.id || !sc.up_count"
+                      @click="runScene(sc, 'stop')">停止</button>
+              <button class="pd-btn pd-btn--ghost pd-btn--icon" title="删除场景" @click="deleteScene(sc)">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+              </button>
+            </div>
+
+            <!-- 新建场景 -->
+            <div class="pd-field" style="border-top:1px solid var(--st-line-soft); padding-top:12px;">
+              <label class="pd-label">新建场景</label>
+              <div class="pd-row" style="gap:8px;">
+                <input v-model="newSceneName" class="pd-input pd-grow" type="text"
+                       placeholder="场景名称，e.g. 客户项目开发">
+                <select v-model="newScenePick" class="pd-input" style="flex:none; width:200px;">
+                  <option disabled value="">选择项目…</option>
+                  <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+                <button @click="addSceneStep" :disabled="!newScenePick" class="pd-btn" style="flex:none;">添加</button>
+              </div>
+              <div v-if="newSceneSteps.length" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                <span v-for="(pid, i) in newSceneSteps" :key="pid" class="pd-badge" data-tone="accent">
+                  {{ i + 1 }}. {{ projectName(pid) }}
+                  <span @click="removeSceneStep(i)" style="cursor:pointer; margin-left:4px;" title="移除">✕</span>
+                </span>
+              </div>
+              <p class="pd-field__note">按添加顺序启动（依赖项放前面），停止时按相反顺序。</p>
+              <button @click="createScene" :disabled="!newSceneName || !newSceneSteps.length"
+                      class="pd-btn pd-btn--solid" data-tone="accent" style="margin-top:8px;">
+                创建场景
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pd-modal__foot">
+          <button type="button" @click="showScenesModal = false" class="pd-btn">关闭</button>
+        </div>
       </div>
     </div>
 
@@ -2764,10 +2938,195 @@ function applyTheme(themeId) {
           command: '',
           port: '',
           description: '',
-          sync_name: false
+          sync_name: false,
+          auto_restart: false
         });
 
         let snapshotIntervalId = null;
+
+        /* ===== 扫描导入 ===== */
+        const showDiscoverModal = ref(false);
+        const discoverRoot = ref(localStorage.getItem('discoverRoot') || '');
+        const discovering = ref(false);
+        const discoverCandidates = ref([]);
+        const discoverSelection = ref({});
+        const discoverError = ref('');
+
+        const canImportCandidate = (c) => !!(c.command && c.port);
+        const discoverSelectedCount = computed(() =>
+          Object.values(discoverSelection.value).filter(Boolean).length);
+
+        const openDiscoverModal = () => {
+          showDiscoverModal.value = true;
+          discoverError.value = '';
+        };
+
+        const runDiscovery = async () => {
+          if (!discoverRoot.value || discovering.value) return;
+          discovering.value = true;
+          discoverError.value = '';
+          try {
+            const res = await fetch(`/api/discover?root=${encodeURIComponent(discoverRoot.value)}`);
+            const data = await res.json();
+            if (!res.ok) {
+              discoverError.value = data.detail || `HTTP ${res.status}`;
+              discoverCandidates.value = [];
+              return;
+            }
+            discoverCandidates.value = data.candidates || [];
+            const sel = {};
+            for (const c of discoverCandidates.value) sel[c.cwd] = false;
+            discoverSelection.value = sel;
+            localStorage.setItem('discoverRoot', discoverRoot.value);
+            if (!discoverCandidates.value.length) {
+              discoverError.value = '没有发现可托管的项目（需要带 dev/start script 的 package.json，或带 fastapi/flask 依赖 + app.py 等入口）。';
+            }
+          } catch (e) {
+            discoverError.value = e.message;
+          } finally {
+            discovering.value = false;
+          }
+        };
+
+        const toggleDiscoverCandidate = (c) => {
+          discoverSelection.value[c.cwd] = !discoverSelection.value[c.cwd];
+        };
+
+        const importDiscovered = async () => {
+          const picked = discoverCandidates.value.filter(
+            c => discoverSelection.value[c.cwd] && !c.already_managed && canImportCandidate(c));
+          if (!picked.length) return;
+          let ok = 0;
+          const failed = [];
+          for (const c of picked) {
+            const payload = {
+              name: c.name, cwd: c.cwd, command: c.command, port: c.port,
+              description: `自扫描导入（${c.kind}）`, sync_name: true, auto_restart: false
+            };
+            const attempt = async (id) => {
+              const res = await fetch('/api/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, ...payload })
+              });
+              if (res.ok) return true;
+              const err = await res.json().catch(() => ({}));
+              return { detail: err.detail || `HTTP ${res.status}` };
+            };
+            let result = await attempt(c.id_hint);
+            if (result !== true && /exists/i.test(result.detail || '')) {
+              result = await attempt(`${c.id_hint}-${Date.now().toString().slice(-4)}`);
+            }
+            if (result === true) { ok += 1; } else { failed.push(`${c.name}: ${result.detail}`); }
+          }
+          showDiscoverModal.value = false;
+          await refreshDashboard(true);
+          if (failed.length) {
+            notifyDialog(`导入完成：成功 ${ok} 个，失败 ${failed.length} 个。\n\n${failed.join('\n')}`,
+              { tone: 'warn', title: '扫描导入' });
+          } else {
+            notify(`已导入 ${ok} 个项目`, 'ok');
+          }
+        };
+
+        /* ===== 场景：按依赖顺序批量启停 ===== */
+        const showScenesModal = ref(false);
+        const scenes = ref([]);
+        const scenesBusy = ref('');
+        const newSceneName = ref('');
+        const newScenePick = ref('');
+        const newSceneSteps = ref([]);
+
+        const projectName = (pid) => {
+          const hit = projects.value.find(p => p.id === pid);
+          return hit ? hit.name : pid;
+        };
+
+        const openScenesModal = async () => {
+          showScenesModal.value = true;
+          await fetchScenes();
+        };
+
+        const fetchScenes = async () => {
+          try {
+            const res = await fetch('/api/scenes');
+            if (res.ok) scenes.value = await res.json();
+          } catch (e) {
+            console.error('Failed to fetch scenes:', e);
+          }
+        };
+
+        const runScene = async (sc, action) => {
+          if (scenesBusy.value) return;
+          scenesBusy.value = sc.id;
+          try {
+            const res = await fetch(`/api/scenes/${sc.id}/${action}`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok && data.success) {
+              notify(data.message || (action === 'start' ? '场景已启动' : '场景已停止'), 'ok');
+            } else {
+              /* 失败即中止：后端保证失败步骤之前的项目保持运行，如实转述 */
+              notifyDialog(`${data.error || data.message || 'HTTP ' + res.status}`,
+                { tone: 'warn', title: `场景${action === 'start' ? '启动' : '停止'}中断` });
+            }
+            await Promise.all([fetchScenes(), refreshDashboard(true)]);
+          } catch (e) {
+            notify(`场景操作失败：${e.message}`, 'danger');
+          } finally {
+            scenesBusy.value = '';
+          }
+        };
+
+        const deleteScene = async (sc) => {
+          if (!await confirmDialog(`确认删除场景「${sc.name}」吗？\n\n只删除场景本身，不影响其中的项目。`,
+            { tone: 'danger', title: '删除场景', confirmLabel: '删除' })) return;
+          try {
+            const res = await fetch(`/api/scenes/${sc.id}`, { method: 'DELETE' });
+            if (res.ok) {
+              await fetchScenes();
+              notify('场景已删除', 'ok');
+            } else {
+              const err = await res.json().catch(() => ({}));
+              notify(`删除失败：${err.detail || '未知错误'}`, 'danger');
+            }
+          } catch (e) {
+            notify(`删除失败：${e.message}`, 'danger');
+          }
+        };
+
+        const addSceneStep = () => {
+          if (!newScenePick.value) return;
+          if (!newSceneSteps.value.includes(newScenePick.value)) {
+            newSceneSteps.value.push(newScenePick.value);
+          }
+          newScenePick.value = '';
+        };
+
+        const removeSceneStep = (i) => {
+          newSceneSteps.value.splice(i, 1);
+        };
+
+        const createScene = async () => {
+          if (!newSceneName.value || !newSceneSteps.value.length) return;
+          try {
+            const res = await fetch('/api/scenes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: newSceneName.value, steps: [...newSceneSteps.value] })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+              newSceneName.value = '';
+              newSceneSteps.value = [];
+              await fetchScenes();
+              notify('场景已创建', 'ok');
+            } else {
+              notify(`创建失败：${data.detail || '未知错误'}`, 'danger');
+            }
+          } catch (e) {
+            notify(`创建失败：${e.message}`, 'danger');
+          }
+        };
 
 /* ===== Settings state & helpers ===== */
 const showSettingsModal = ref(false);
@@ -3233,10 +3592,11 @@ const resetPreferences = async () => {
           form.id = `port-${portObj.port}-${Date.now().toString().slice(-4)}`;
           form.name = `${portObj.process === 'Unknown' ? '本地网页服务' : portObj.process.replace('[Win] ', '')}-${portObj.port}`;
           form.port = portObj.port;
-          form.cwd = '/mnt/g/AITOOLS/mydashboard';
+          form.cwd = '';
           form.command = portObj.process !== 'Unknown' ? `${portObj.process.replace('[Win] ', '')}` : 'node server.js';
           form.description = `自全局扫描中导入的端口 ${portObj.port} 进程服务`;
           form.sync_name = false;
+          form.auto_restart = false;
           showProjectModal.value = true;
         };
 
@@ -3244,11 +3604,12 @@ const resetPreferences = async () => {
           isEditing.value = false;
           form.id = `project-${Date.now().toString().slice(-4)}`;
           form.name = '';
-          form.cwd = '/mnt/g/AITOOLS/mydashboard';
+          form.cwd = '';
           form.command = '';
           form.port = '';
           form.description = '';
           form.sync_name = false;
+          form.auto_restart = false;
           showProjectModal.value = true;
         };
 
@@ -3261,6 +3622,7 @@ const resetPreferences = async () => {
           form.port = proj.port;
           form.description = proj.description;
           form.sync_name = !!proj.sync_name;
+          form.auto_restart = !!proj.auto_restart;
           showProjectModal.value = true;
         };
 
@@ -3373,8 +3735,12 @@ const resetPreferences = async () => {
             logContent.value += text;
           }
           nextTick(() => {
-            if (terminalBox.value) {
-              terminalBox.value.scrollTop = terminalBox.value.scrollHeight;
+            const box = terminalBox.value;
+            if (!box) return;
+            /* 只有本就停在底部附近才自动跟随，否则会把正在上翻旧日志的用户拽回去 */
+            const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+            if (reset || nearBottom) {
+              box.scrollTop = box.scrollHeight;
             }
           });
         };
@@ -3453,6 +3819,18 @@ const resetPreferences = async () => {
           }
           if (e.key === 'Escape' && showSettingsModal.value) {
             showSettingsModal.value = false;
+            return;
+          }
+          if (e.key === 'Escape' && showProjectModal.value) {
+            showProjectModal.value = false;
+            return;
+          }
+          if (e.key === 'Escape' && showDiscoverModal.value) {
+            showDiscoverModal.value = false;
+            return;
+          }
+          if (e.key === 'Escape' && showScenesModal.value) {
+            showScenesModal.value = false;
             return;
           }
           if ((e.metaKey || e.ctrlKey) && e.key === ',') {
@@ -3634,6 +4012,33 @@ const resetPreferences = async () => {
           openEditProjectModal,
           saveProject,
           deleteProject,
+
+          showDiscoverModal,
+          discoverRoot,
+          discovering,
+          discoverCandidates,
+          discoverSelection,
+          discoverError,
+          discoverSelectedCount,
+          canImportCandidate,
+          openDiscoverModal,
+          runDiscovery,
+          toggleDiscoverCandidate,
+          importDiscovered,
+
+          showScenesModal,
+          scenes,
+          scenesBusy,
+          newSceneName,
+          newScenePick,
+          newSceneSteps,
+          projectName,
+          openScenesModal,
+          runScene,
+          deleteScene,
+          addSceneStep,
+          removeSceneStep,
+          createScene,
           fetchSystemPorts,
           manualRefresh,
           snapshotLoading,

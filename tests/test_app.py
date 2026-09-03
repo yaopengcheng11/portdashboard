@@ -119,6 +119,41 @@ class TestValidateProjectId:
         with pytest.raises(HTTPException):
             app.validate_project_id(bad)
 
+    def test_id_becomes_log_filename_so_must_be_safe(self):
+        """:" 会变成 NTFS 备用数据流，Windows 保留设备名即使带 .log 也指向设备。"""
+        for bad in ["foo:bar", "con", "nul", ".hidden", "-leading-dash"]:
+            with pytest.raises(HTTPException):
+                app.validate_project_id(bad)
+
+
+class TestPidReuseGuard:
+    def test_legacy_entry_without_timestamp_passes(self):
+        assert app._pid_matches_start(1, None) is True
+
+    def test_dead_process_fails_check(self):
+        # 找一个几乎必然不存在的 pid（Windows 保留 0/4，>4 的空闲值即可）
+        dead_pid = next((c for c in range(999999, 900000, -1) if not psutil.pid_exists(c)), None)
+        if dead_pid is None:
+            pytest.skip("no free pid found on this machine")
+        assert app._pid_matches_start(dead_pid, 1234567890.0) is False
+
+
+class TestResolveExecutable:
+    def test_bare_name_on_path_is_resolved(self):
+        argv = app._resolve_executable(["python", "--version"])
+        assert argv[0] != "python"          # 解析成了绝对路径
+        assert "/" in argv[0] or "\\" in argv[0]
+        assert argv[1:] == ["--version"]
+
+    def test_pathed_command_is_untouched(self):
+        argv = app._resolve_executable([r"C:\tools\serve.exe", "run"])
+        assert argv == [r"C:\tools\serve.exe", "run"]
+
+    def test_unknown_command_passes_through(self):
+        """解析不到就保持原样，让 Popen 抛出可读的 FileNotFoundError。"""
+        argv = app._resolve_executable(["definitely-not-a-real-bin-42", "x"])
+        assert argv == ["definitely-not-a-real-bin-42", "x"]
+
 
 class TestNormalizePidRegistry:
     def test_legacy_int_format(self):
@@ -136,17 +171,17 @@ class TestNormalizePidRegistry:
 
 class TestCategorizeProcess:
     def test_system_process(self):
-        assert app.categorize_process("launchd", []) == "system"
-        assert app.categorize_process("svchost.exe", []) == "system"
+        assert app.categorize_process("launchd") == "system"
+        assert app.categorize_process("svchost.exe") == "system"
 
     def test_network_process(self):
-        assert app.categorize_process("clash", []) == "network"
+        assert app.categorize_process("clash") == "network"
 
     def test_creative_process(self):
-        assert app.categorize_process("blender", []) == "creative"
+        assert app.categorize_process("blender") == "creative"
 
     def test_user_process_default(self):
-        assert app.categorize_process("node", []) == "user"
+        assert app.categorize_process("node") == "user"
 
 
 class TestCoercePreferences:
@@ -163,6 +198,32 @@ class TestCoercePreferences:
         assert out["refresh_interval"] == 10
         assert out["port"] == 8080
         assert out["auto_refresh"] is False
+
+
+class TestWatchdogBackoff:
+    def test_schedule_and_cap(self):
+        assert app._watchdog_backoff(0) == 5
+        assert app._watchdog_backoff(1) == 10
+        assert app._watchdog_backoff(2) == 20
+        assert app._watchdog_backoff(4) == 60
+        assert app._watchdog_backoff(9) == 60      # 封顶
+        assert app._watchdog_backoff(99) == 60
+
+    def test_project_model_has_auto_restart_default_off(self):
+        p = app.Project(id="a", name="a", cwd=".", command="x", port=1)
+        assert p.auto_restart is False
+
+
+class TestScenes:
+    def test_coerce_steps_dedupes_and_keeps_order(self):
+        assert app._coerce_scene_steps(["b", "a", "b", " c ", "", 3]) == ["b", "a", "c", "3"]
+
+    def test_coerce_steps_rejects_non_list(self):
+        assert app._coerce_scene_steps("not-a-list") == []
+        assert app._coerce_scene_steps(None) == []
+
+    def test_slugify_available_for_scene_ids(self):
+        assert app.slugify_project_id("客户 项目 Dev") == "dev"
 
 
 class TestIsSystemPort:

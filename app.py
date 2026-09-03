@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -31,6 +32,7 @@ from port_parser import (
     format_addr,
 )
 from http_probe import check_http_port as _check_http_port_impl
+from discovery import discover_projects as _discover_projects, slugify_project_id
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
@@ -40,6 +42,7 @@ IS_LINUX = sys.platform.startswith("linux")
 async def lifespan(app: FastAPI):
     readopt_processes()
     ensure_background_refresh_thread()
+    ensure_background_watchdog_thread()
     invalidate_ports_cache()
     yield
 
@@ -116,13 +119,32 @@ class Project(BaseModel):
     port: int
     description: Optional[str] = ""
     sync_name: bool = False
+    auto_restart: bool = False
     startup_timeout_sec: int = 30
     health_check_url: str = ""
 
 
+# id 会被用作日志文件名（{id}.log），因此按"安全文件名"标准收紧：
+# 字母/数字开头，只含字母数字 - _ ；显式挡掉 Windows 保留设备名（con.log 这类
+# 即使带扩展名也会被 NTFS 当设备解析）。
+_PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_WINDOWS_RESERVED_NAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
 def validate_project_id(project_id: str) -> str:
-    if "/" in project_id or "\\" in project_id or ".." in project_id or not project_id.strip():
-        raise HTTPException(status_code=400, detail="Invalid project ID: contains path traversal characters")
+    if (
+        not project_id
+        or not _PROJECT_ID_RE.match(project_id)
+        or project_id.lower() in _WINDOWS_RESERVED_NAMES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid project ID: use 1-64 chars of letters, digits, '-' or '_', starting with a letter or digit",
+        )
     return project_id
 
 
@@ -157,8 +179,18 @@ def load_projects() -> List[dict]:
     try:
         with PROJECTS_LOCK:
             with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+        return data if isinstance(data, list) else []
     except Exception:
+        # 损坏时改名隔离而不是静默吞掉：否则下一次 save_projects 会把
+        # 仅存的原始数据覆盖成空表 + 新条目，用户项目全丢。
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        try:
+            with PROJECTS_LOCK:
+                os.replace(PROJECTS_FILE, f"{PROJECTS_FILE}.corrupt-{stamp}")
+            print(f"projects.json 已损坏，已隔离为 projects.json.corrupt-{stamp}；返回空项目列表")
+        except OSError:
+            pass
         return []
 
 
@@ -204,6 +236,7 @@ def infer_project_display_name(cwd: str) -> Optional[str]:
 def apply_project_display_name(project: dict) -> dict:
     normalized = dict(project)
     normalized["sync_name"] = bool(normalized.get("sync_name", False))
+    normalized["auto_restart"] = bool(normalized.get("auto_restart", False))
     if normalized["sync_name"]:
         inferred_name = infer_project_display_name(normalized.get("cwd", ""))
         if inferred_name:
@@ -229,6 +262,24 @@ def save_running_pids(pids: dict):
 
 def is_pid_running(pid: int) -> bool:
     return psutil.pid_exists(pid)
+
+
+def _pid_matches_start(pid: int, started_at) -> bool:
+    """PID 复用防护：进程的创建时间必须与注册时的 started_at 对得上。
+
+    PID 在进程死后会被系统复用——只检查 pid_exists 会把一个无关新进程
+    认领成托管项目，之后"停止"就会误杀它。started_at 为 None（旧格式
+    注册表，无法比对）时放行，保持向后兼容。
+    """
+    if not started_at:
+        return True
+    try:
+        create_time = psutil.Process(pid).create_time()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return False
+    # started_at 在 spawn 之后取样，create_time 在 spawn 时刻，同源时钟，
+    # 容差 2s 足够覆盖取值延迟；PID 复用的新进程 create_time 必然晚得多。
+    return abs(create_time - started_at) <= 2.0
 
 
 def _infer_project_name_for_pid(pid: int) -> str:
@@ -322,21 +373,20 @@ def _parse_ports_fallback() -> List[dict]:
     return ports
 
 
-def _enrich_with_dashboard_project(ports: List[dict]) -> List[dict]:
-    """Add ``dashboard_project`` field to each port dict, mapping PID -> project_id.
+def _collect_managed_pids() -> Dict[int, str]:
+    """Map every PID belonging to a managed project -> project_id.
 
-    Lookup priority:
-      1. ACTIVE_PROCESSES (in-memory, has the Popen objects) - authoritative
-      2. running_pids.json (persisted registry, may have stale entries if process died)
+    包含托管进程的全部后代：Windows 上启动链常有中间层（WindowsApps 存根、
+    npm.cmd -> cmd.exe -> node），真正监听端口的 PID 是 Popen 进程的子孙，
+    只按直接 PID 匹配会让 dashboard_project 标记与启动预检全部落空。
     """
-    # Build PID -> project_id map from ACTIVE_PROCESSES
-    pid_to_project = {}
+    root_to_project: Dict[int, str] = {}
     with PROC_LOCK:
         active_snapshot = dict(ACTIVE_PROCESSES)
     for project_id, proc in active_snapshot.items():
         try:
             if proc.pid:
-                pid_to_project[proc.pid] = project_id
+                root_to_project[proc.pid] = project_id
         except Exception:
             pass
     # Also check running_pids.json for managed-but-not-currently-tracked entries
@@ -344,10 +394,32 @@ def _enrich_with_dashboard_project(ports: List[dict]) -> List[dict]:
         pids_map = load_running_pids()
         for project_id, entry in pids_map.items():
             pid = entry.get("pid") if isinstance(entry, dict) else None
-            if pid and pid not in pid_to_project:
-                pid_to_project[pid] = project_id
+            if pid and pid not in root_to_project:
+                root_to_project[pid] = project_id
     except Exception:
         pass
+
+    pid_to_project: Dict[int, str] = {}
+    for root_pid, project_id in root_to_project.items():
+        pid_to_project[root_pid] = project_id
+        try:
+            for child in psutil.Process(root_pid).children(recursive=True):
+                pid_to_project[child.pid] = project_id
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            pass
+    return pid_to_project
+
+
+def _enrich_with_dashboard_project(ports: List[dict]) -> List[dict]:
+    """Add ``dashboard_project`` field to each port dict, mapping PID -> project_id.
+
+    Lookup priority:
+      1. ACTIVE_PROCESSES (in-memory, has the Popen objects) - authoritative
+      2. running_pids.json (persisted registry, may have stale entries if process died)
+
+    Matching covers the whole managed process tree, not just the root PID.
+    """
+    pid_to_project = _collect_managed_pids()
     # Apply to each port
     for port_info in ports:
         pid = port_info.get("pid")
@@ -359,7 +431,7 @@ def get_active_system_ports(force_refresh: bool = False) -> List[dict]:
     now = time.time()
     with PORTS_CACHE_LOCK:
         if not force_refresh and now - PORTS_CACHE["timestamp"] < PORTS_CACHE_TTL:
-            return list(PORTS_CACHE["value"])
+            return [dict(p) for p in PORTS_CACHE["value"]]
 
     ports_info = parse_listening_ports()
     _enrich_with_dashboard_project(ports_info)
@@ -367,7 +439,7 @@ def get_active_system_ports(force_refresh: bool = False) -> List[dict]:
     with PORTS_CACHE_LOCK:
         PORTS_CACHE["timestamp"] = time.time()
         PORTS_CACHE["value"] = ports_info
-        return list(PORTS_CACHE["value"])
+        return [dict(p) for p in ports_info]
 
 
 def invalidate_ports_cache():
@@ -391,6 +463,132 @@ def ensure_background_refresh_thread():
     thread = threading.Thread(target=background_refresh_ports_cache, daemon=True, name="ports-cache-refresh")
     thread.start()
     PORTS_REFRESH_THREAD_STARTED = True
+
+
+# ---------------------------------------------------------------------------
+# Crash watchdog — auto_restart 项目的意外退出拉起。
+#
+# 语义约定：
+#   * 只重启"曾见它活着"的项目 —— 开机时不会把所有停止的项目拉起来；
+#   * 手动 stop / delete 会把项目加入 WATCHDOG_SUPPRESS，直到下次手动 start；
+#   * 连续存活超过 60s 视为稳定，退避计数清零；重启失败按 5/10/20/40/60s 退避；
+#   * 端口仍被外部进程占住时不重启（多半是崩溃残留的孤儿进程），暂停并记日志。
+# ---------------------------------------------------------------------------
+
+WATCHDOG_SUPPRESS: set = set()
+WATCHDOG_STATE: Dict[str, dict] = {}   # project_id -> {pid, up_since, failures, next_retry_at}
+WATCHDOG_TICK = 5.0
+WATCHDOG_BACKOFF = (5, 10, 20, 40, 60)
+WATCHDOG_STABLE_AFTER = 60.0
+WATCHDOG_THREAD_STARTED = False
+
+
+def _watchdog_backoff(failures: int) -> float:
+    return WATCHDOG_BACKOFF[min(max(failures, 0), len(WATCHDOG_BACKOFF) - 1)]
+
+
+def _project_running_pid(project: dict) -> Optional[int]:
+    """项目当前是否有活着的托管进程：ACTIVE 优先，其次注册表（含 PID 复用比对）。"""
+    project_id = project["id"]
+    with PROC_LOCK:
+        proc = ACTIVE_PROCESSES.get(project_id)
+        if proc and proc.poll() is None:
+            return proc.pid
+    entry = load_running_pids().get(project_id)
+    if entry and is_pid_running(entry["pid"]) and _pid_matches_start(entry["pid"], entry.get("started_at")):
+        return entry["pid"]
+    return None
+
+
+def _watchdog_restart(project: dict) -> Tuple[bool, str, Optional[int]]:
+    """看护重启：端口预检 → 复用统一 spawn 路径 → 短暂确认存活。"""
+    project_id = project["id"]
+    try:
+        active_ports = get_active_system_ports(force_refresh=True)
+        conflict = next((p for p in active_ports if p.get("port") == project["port"]), None)
+        if conflict and conflict.get("pid") not in _collect_managed_pids():
+            return False, (
+                f"port {project['port']} still held by external process "
+                f"'{conflict.get('process')}' (PID {conflict.get('pid')}); restart paused"
+            ), None
+        if not os.path.isdir(project["cwd"]):
+            return False, f"working directory missing: {project['cwd']}", None
+        argv, env_overrides = parse_command(project["command"])
+        argv = _resolve_executable(argv)
+        proc = _spawn_and_register(project, argv, env_overrides, log_mode="a")
+    except Exception as e:
+        return False, f"spawn failed: {e}", None
+
+    # 给 2 秒确认真的起来了（与无 health_url 的手动启动语义一致）
+    time.sleep(2)
+    if proc.poll() is not None:
+        return False, f"process exited immediately with code {proc.returncode}", proc.pid
+    pids_map = load_running_pids()
+    pids_map[project_id] = {"pid": proc.pid, "managed": True, "started_at": time.time()}
+    save_running_pids(pids_map)
+    invalidate_ports_cache()
+    return True, f"restarted as PID {proc.pid}", proc.pid
+
+
+def _watchdog_tick():
+    for project in load_projects():
+        project_id = project["id"]
+        if not project.get("auto_restart") or project_id in WATCHDOG_SUPPRESS:
+            WATCHDOG_STATE.pop(project_id, None)
+            continue
+
+        state = WATCHDOG_STATE.setdefault(project_id, {"pid": None, "up_since": None,
+                                                       "failures": 0, "next_retry_at": 0.0})
+        now = time.time()
+        pid = _project_running_pid(project)
+        if pid:
+            if state.get("pid") != pid:
+                state["pid"] = pid
+                state["up_since"] = now
+            elif state.get("up_since") and now - state["up_since"] > WATCHDOG_STABLE_AFTER:
+                state["failures"] = 0
+            continue
+
+        # 进程没了：只有这轮巡检之前见过它活着，才算"意外退出"。
+        if not state.get("pid"):
+            continue
+        if now < state.get("next_retry_at", 0.0):
+            continue
+
+        failures = state.get("failures", 0)
+        append_log_line(
+            project_id,
+            f"\n[watchdog] managed process (PID {state['pid']}) exited unexpectedly; "
+            f"auto-restarting (attempt {failures + 1})\n",
+        )
+        ok, detail, new_pid = _watchdog_restart(project)
+        if ok:
+            state.update({"pid": new_pid, "up_since": time.time(),
+                          "failures": failures + 1, "next_retry_at": 0.0})
+            append_log_line(project_id, f"[watchdog] {detail}\n")
+        else:
+            delay = _watchdog_backoff(failures + 1)
+            state.update({"failures": failures + 1, "next_retry_at": time.time() + delay,
+                          "pid": None, "up_since": None})
+            append_log_line(project_id, f"[watchdog] restart failed: {detail}; retry in {delay}s\n")
+
+
+def background_watchdog():
+    while True:
+        try:
+            _watchdog_tick()
+        except Exception as e:
+            print(f"Watchdog error: {e}")
+        time.sleep(WATCHDOG_TICK)
+
+
+def ensure_background_watchdog_thread():
+    global WATCHDOG_THREAD_STARTED
+    if WATCHDOG_THREAD_STARTED:
+        return
+    thread = threading.Thread(target=background_watchdog, daemon=True, name="crash-watchdog")
+    thread.start()
+    WATCHDOG_THREAD_STARTED = True
 
 
 def cleanup_stale_process_tracking(project_id: str, pids_map: Optional[dict] = None) -> bool:
@@ -421,11 +619,11 @@ def readopt_processes():
     updated_pids_map = {}
     for proj_id, entry in pids_map.items():
         pid = entry["pid"]
-        if is_pid_running(pid):
+        if is_pid_running(pid) and _pid_matches_start(pid, entry.get("started_at")):
             updated_pids_map[proj_id] = entry
             print(f"Re-adopted running project {proj_id} with PID {pid}")
         else:
-            print(f"Project {proj_id} with PID {pid} is no longer running")
+            print(f"Project {proj_id} with PID {pid} is no longer running (or PID was reused)")
     save_running_pids(updated_pids_map)
 
 
@@ -495,12 +693,13 @@ def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map:
         managed = True
     else:
         entry = pids_map.get(project_id)
-        if entry and is_pid_running(entry["pid"]):
+        if entry and is_pid_running(entry["pid"]) and _pid_matches_start(entry["pid"], entry.get("started_at")):
             status = "running"
             current_pid = entry["pid"]
             process_owner = "Dashboard (Adopted)"
             managed = True
         elif entry:
+            # 进程已死，或 PID 已被复用（create_time 对不上）——都按失效处理
             pids_map.pop(project_id, None)
             dirty = True
 
@@ -572,6 +771,11 @@ def _kill_process_tree(pid: int) -> bool:
     """Kill a process and all its children directly via psutil. Best-effort."""
     try:
         proc = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return True  # 目标已经不在了，视为成功
+    except psutil.AccessDenied:
+        return False
+    try:
         for child in proc.children(recursive=True):
             try:
                 child.kill()
@@ -583,7 +787,7 @@ def _kill_process_tree(pid: int) -> bool:
         return False
 
 
-def categorize_process(process_name: str, ports: list) -> str:
+def categorize_process(process_name: str) -> str:
     """Categorize a process into user-facing groups."""
     name = process_name.lower()
     # Strip .exe suffix for cross-platform compatibility
@@ -670,7 +874,7 @@ def group_ports_by_process(ports: List[dict]) -> List[dict]:
         primary = http_ports[0] if http_ports else port_list[0]
 
         # Categorize process
-        category = categorize_process(primary.get('process', 'Unknown'), [p['port'] for p in port_list])
+        category = categorize_process(primary.get('process', 'Unknown'))
 
         result.append({
             'pid': pid,
@@ -740,6 +944,80 @@ def parse_command(command: str) -> Tuple[List[str], dict]:
     return parts, env_overrides
 
 
+def _resolve_executable(argv: List[str]) -> List[str]:
+    """把裸命令名解析成 PATH 里的真实可执行路径。
+
+    Windows 的 CreateProcess 不会按 PATHEXT 解析 .cmd/.bat shim —— list 形式的
+    Popen(["npm", ...]) 直接 FileNotFoundError [WinError 2]，而 npm/npx/pnpm/vite
+    在 Windows 上全是 .cmd shim。shutil.which 会查 PATHEXT，能把 npm 解析成
+    npm.cmd 的全路径（.bat/.cmd 由 CreateProcess 自动经 cmd.exe 执行）。
+    Unix 上 which 只是把 PATH 解析显式化，无副作用。
+    """
+    if not argv:
+        return argv
+    exe = argv[0]
+    if os.path.dirname(exe):
+        return argv  # 已带路径，尊重用户写法
+    resolved = shutil.which(exe)
+    if resolved:
+        return [resolved] + argv[1:]
+    return argv  # 保持原样，让 Popen 抛出可读的 FileNotFoundError
+
+
+def _spawn_and_register(project: dict, argv: List[str], env_overrides: dict,
+                        log_mode: str = "w") -> subprocess.Popen:
+    """打开项目日志、启动进程、登记为 active。
+
+    手动启动与崩溃看护共用这一条路径；watchdog 重启传 log_mode="a"
+    （追加，保留崩溃现场），手动启动默认 "w"（截断开新头）。
+    """
+    project_id = project["id"]
+    cwd = project["cwd"]
+    log_file = open(os.path.join(LOGS_DIR, f"{project_id}.log"), log_mode, encoding="utf-8")
+    if log_mode == "w":
+        log_file.write(f"=== Starting project '{project['name']}' at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    else:
+        log_file.write(f"=== Watchdog restarting project '{project['name']}' at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    log_file.write(f"CWD: {cwd}\n")
+    log_file.write(f"Command: {' '.join(argv)}\n")
+    if env_overrides:
+        log_file.write(f"Env Overrides: {json.dumps(env_overrides, ensure_ascii=False)}\n")
+    log_file.write("===========================================================\n\n")
+    log_file.flush()
+
+    sub_env = os.environ.copy()
+    sub_env.update(env_overrides)
+    sub_env["PYTHONUNBUFFERED"] = "1"
+    sub_env["FORCE_COLOR"] = "1"
+
+    # Platform-specific process creation
+    if IS_WINDOWS:
+        creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env=sub_env,
+            creationflags=creation_flags,
+        )
+    else:
+        # Unix: use start_new_session to create new process group
+        proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env=sub_env,
+            start_new_session=True,
+        )
+
+    with PROC_LOCK:
+        ACTIVE_PROCESSES[project_id] = proc
+        ACTIVE_LOG_FILES[project_id] = log_file
+    return proc
+
+
 def terminate_managed_pid(pid: int) -> bool:
     if pid <= 4:
         return False
@@ -750,24 +1028,37 @@ def terminate_managed_pid(pid: int) -> bool:
         if proc_name in protected:
             print(f"Refused to kill protected system process: {proc_name} (PID {pid})")
             return False
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except psutil.NoSuchProcess:
+        return True  # 已经退出
+    except (psutil.AccessDenied, OSError):
         pass
 
     try:
         if IS_WINDOWS:
             result = subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True, text=True, timeout=5.0
+                capture_output=True, text=True,
+                encoding="mbcs", errors="ignore",  # 中文 Windows 的 taskkill 输出是 GBK
+                timeout=5.0,
             )
             return result.returncode == 0
         else:
-            # Unix: kill entire process group
+            # Unix: 先对整个进程组发 SIGTERM，给它善终的机会
             try:
                 os.killpg(os.getpgid(pid), signal.SIGTERM)
             except (ProcessLookupError, PermissionError):
-                # If process group kill fails, try killing the process directly
-                _kill_process_tree(pid)
-            return True
+                # 组杀失败（如非组头/无权限），退化为直接杀进程树
+                return _kill_process_tree(pid)
+            # 等它退出；超时升级 SIGKILL。必须核实结果再返回，
+            # 否则 stop 会虚报成功而进程其实还活着。
+            try:
+                psutil.Process(pid).wait(timeout=3)
+                return True
+            except psutil.TimeoutExpired:
+                print(f"PID {pid} did not exit after SIGTERM, escalating to SIGKILL")
+                return _kill_process_tree(pid)
+            except psutil.NoSuchProcess:
+                return True
     except Exception:
         return _kill_process_tree(pid)
 
@@ -839,12 +1130,30 @@ def get_projects_api():
 
 @app.post("/api/projects")
 def create_project(project: Project):
+    validate_project_id(project.id)
     projects = load_projects()
     if any(p["id"] == project.id for p in projects):
         raise HTTPException(status_code=400, detail="Project ID already exists")
     projects.append(apply_project_display_name(project.model_dump()))
     save_projects(projects)
     return {"success": True, "project": project}
+
+
+@app.get("/api/discover")
+def discover_projects_api(root: str, max_depth: int = 2):
+    """扫描 root 目录，返回可托管项目候选（前端勾选后走 POST /api/projects 导入）。"""
+    root_path = root.strip()
+    if not root_path or not os.path.isdir(root_path):
+        raise HTTPException(status_code=400, detail=f"Root directory does not exist: {root_path}")
+    candidates = _discover_projects(root_path, max_depth=max(1, min(max_depth, 4)))
+    managed_cwds = {
+        os.path.normcase(os.path.normpath(p.get("cwd", "")))
+        for p in load_projects()
+    }
+    for candidate in candidates:
+        candidate["already_managed"] = \
+            os.path.normcase(os.path.normpath(candidate["cwd"])) in managed_cwds
+    return {"root": root_path, "candidates": candidates}
 
 
 @app.put("/api/projects/{project_id}")
@@ -854,6 +1163,9 @@ def update_project(project_id: str, updated_project: Project):
     index = next((i for i, p in enumerate(projects) if p["id"] == project_id), -1)
     if index == -1:
         raise HTTPException(status_code=404, detail="Project not found")
+    # 身份以 URL 路径为准：body 里的 id 与路径不一致时会被整体写回，
+    # 导致 ACTIVE_PROCESSES / running_pids / 日志文件全部挂在旧 id 上变孤儿。
+    updated_project.id = project_id
     projects[index] = apply_project_display_name(updated_project.model_dump())
     save_projects(projects)
     return {"success": True, "project": updated_project}
@@ -866,6 +1178,7 @@ def delete_project(project_id: str):
     index = next((i for i, p in enumerate(projects) if p["id"] == project_id), -1)
     if index == -1:
         raise HTTPException(status_code=404, detail="Project not found")
+    WATCHDOG_SUPPRESS.add(project_id)
     try:
         stop_project(project_id)
     except Exception:
@@ -873,6 +1186,189 @@ def delete_project(project_id: str):
     projects.pop(index)
     save_projects(projects)
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Scenes — 把若干托管项目编成场景，按依赖顺序批量启动 / 逆序批量停止。
+# 存储在 scenes.json（用户数据，gitignore），与 projects.json 的列表结构分离，
+# 避免动老文件的格式。步骤里引用的项目 id 在启动时才解析，容忍"先建场景后建项目"。
+# ---------------------------------------------------------------------------
+
+SCENES_FILE = os.path.join(BASE_DIR, "scenes.json")
+SCENES_LOCK = threading.Lock()
+
+
+def load_scenes() -> List[dict]:
+    if not os.path.exists(SCENES_FILE):
+        return []
+    try:
+        with SCENES_LOCK:
+            with open(SCENES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        return [s for s in data if isinstance(s, dict)] if isinstance(data, list) else []
+    except Exception:
+        # 与 projects.json 同一策略：损坏时改名隔离，不静默吞
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        try:
+            with SCENES_LOCK:
+                os.replace(SCENES_FILE, f"{SCENES_FILE}.corrupt-{stamp}")
+            print(f"scenes.json 已损坏，已隔离为 scenes.json.corrupt-{stamp}")
+        except OSError:
+            pass
+        return []
+
+
+def save_scenes(scenes: List[dict]):
+    with SCENES_LOCK:
+        atomic_write_json(SCENES_FILE, scenes)
+
+
+def _coerce_scene_steps(steps) -> List[str]:
+    """去重保序的项目 id 列表；顺序即启动顺序。"""
+    out, seen = [], set()
+    for s in (steps if isinstance(steps, list) else []):
+        s = str(s).strip()
+        if s and s not in seen:
+            out.append(s)
+            seen.add(s)
+    return out
+
+
+def _scene_step_state(project_id: str, port) -> str:
+    """场景视角的单步状态：managed / external / stopped。"""
+    with PROC_LOCK:
+        proc = ACTIVE_PROCESSES.get(project_id)
+        if proc and proc.poll() is None:
+            return "managed"
+    entry = load_running_pids().get(project_id)
+    if entry and is_pid_running(entry["pid"]) and _pid_matches_start(entry["pid"], entry.get("started_at")):
+        return "managed"
+    for p in get_active_system_ports():
+        if p.get("port") == port:
+            return "external"
+    return "stopped"
+
+
+def _get_scene_or_404(scene_id: str) -> dict:
+    # 场景 id 与项目 id 共用同一套字符规则（同样要当 URL 片段）
+    scene_id = validate_project_id(scene_id)
+    scene = next((s for s in load_scenes() if s.get("id") == scene_id), None)
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    return scene
+
+
+@app.get("/api/scenes")
+def get_scenes_api():
+    projects = {p["id"]: p for p in load_projects()}
+    out = []
+    for scene in load_scenes():
+        steps = []
+        for pid in scene.get("steps", []):
+            project = projects.get(pid)
+            if not project:
+                steps.append({"project_id": pid, "name": pid, "state": "missing"})
+            else:
+                state = _scene_step_state(pid, project.get("port"))
+                steps.append({"project_id": pid, "name": project["name"], "state": state})
+        up = sum(1 for s in steps if s["state"] in ("managed", "external"))
+        out.append({"id": scene["id"], "name": scene.get("name", scene["id"]),
+                    "steps": steps, "up_count": up, "total": len(steps)})
+    return out
+
+
+@app.post("/api/scenes")
+def create_scene(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    name = str(body.get("name") or "").strip()
+    steps = _coerce_scene_steps(body.get("steps"))
+    if not name or not steps:
+        raise HTTPException(status_code=400, detail="Scene needs a name and at least one project step")
+    scenes = load_scenes()
+    base = slugify_project_id(name)
+    scene_id, n = base, 1
+    while any(s.get("id") == scene_id for s in scenes):
+        n += 1
+        scene_id = f"{base}-{n}"
+    scenes.append({"id": scene_id, "name": name[:80], "steps": steps})
+    save_scenes(scenes)
+    return {"success": True, "scene": {"id": scene_id, "name": name, "steps": steps}}
+
+
+@app.put("/api/scenes/{scene_id}")
+def update_scene(scene_id: str, body: dict):
+    scene = _get_scene_or_404(scene_id)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    name = str(body.get("name") or "").strip()
+    steps = _coerce_scene_steps(body.get("steps"))
+    if not name or not steps:
+        raise HTTPException(status_code=400, detail="Scene needs a name and at least one project step")
+    scenes = load_scenes()
+    for s in scenes:
+        if s.get("id") == scene["id"]:
+            s["name"], s["steps"] = name[:80], steps
+    save_scenes(scenes)
+    return {"success": True, "scene": {"id": scene["id"], "name": name, "steps": steps}}
+
+
+@app.delete("/api/scenes/{scene_id}")
+def delete_scene(scene_id: str):
+    scene = _get_scene_or_404(scene_id)
+    save_scenes([s for s in load_scenes() if s.get("id") != scene["id"]])
+    return {"success": True}
+
+
+@app.post("/api/scenes/{scene_id}/start")
+async def start_scene(scene_id: str):
+    scene = _get_scene_or_404(scene_id)
+    projects = {p["id"]: p for p in load_projects()}
+    results = []
+    for pid in scene.get("steps", []):
+        project = projects.get(pid)
+        if not project:
+            results.append({"project_id": pid, "status": "missing"})
+            return {"success": False, "results": results,
+                    "error": f"步骤 {pid} 对应的项目已不存在，已中止（前面步骤保持运行）"}
+        state = _scene_step_state(pid, project.get("port"))
+        if state == "managed":
+            results.append({"project_id": pid, "status": "already_running"})
+            continue
+        if state == "external":
+            # 端口已被外部进程服务 → 依赖已就绪，跳过但如实标注
+            results.append({"project_id": pid, "status": "external_serving"})
+            continue
+        try:
+            r = await _start_project_core(project)
+            results.append({"project_id": pid, "status": "started", "pid": r.get("pid")})
+        except HTTPException as e:
+            results.append({"project_id": pid, "status": "failed", "detail": str(e.detail)})
+            invalidate_ports_cache()
+            return {"success": False, "results": results,
+                    "error": f"{project['name']}: {e.detail}"}
+    invalidate_ports_cache()
+    return {"success": True, "results": results,
+            "message": f"Scene '{scene.get('name')}' started ({len(results)} steps)"}
+
+
+@app.post("/api/scenes/{scene_id}/stop")
+def stop_scene(scene_id: str):
+    scene = _get_scene_or_404(scene_id)
+    projects = {p["id"]: p for p in load_projects()}
+    results = []
+    for pid in reversed(scene.get("steps", [])):
+        project = projects.get(pid)
+        if not project:
+            results.append({"project_id": pid, "status": "missing"})
+            continue
+        r = _stop_project_core(project)
+        results.append({"project_id": pid,
+                        "status": "stopped" if r.get("success") else "not_stopped",
+                        "detail": r.get("message", "")})
+    invalidate_ports_cache()
+    return {"success": True, "results": results,
+            "message": f"Scene '{scene.get('name')}' stopped ({len(results)} steps)"}
 
 
 def _probe_health_url(health_url: str) -> bool:
@@ -936,14 +1432,12 @@ def _kill_active_proc(project_id: str, proc: subprocess.Popen) -> None:
                 pass
 
 
-@app.post("/api/projects/{project_id}/start")
-async def start_project(project_id: str):
-    project_id = validate_project_id(project_id)
-    projects = load_projects()
-    project = next((p for p in projects if p["id"] == project_id), None)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+async def _start_project_core(project: dict) -> dict:
+    """启动单个托管项目：状态检查 → 端口预检 → spawn → 健康检查 → 登记。
 
+    手动启动路由与场景编排共用；失败抛 HTTPException，成功返回启动信息。
+    """
+    project_id = project["id"]
     snapshot = await asyncio.to_thread(get_projects_snapshot)
     current_state = next((p for p in snapshot if p["id"] == project_id), None)
     if current_state and current_state["status"] == "running" and current_state["managed"]:
@@ -959,6 +1453,7 @@ async def start_project(project_id: str):
         raise HTTPException(status_code=400, detail=f"Working directory does not exist: {cwd}")
 
     argv, env_overrides = parse_command(project["command"])
+    argv = _resolve_executable(argv)
 
     # Pre-flight: 检查目标端口是否已被外部进程占用（强制刷新端口快照，避免竞态）
     active_ports = await asyncio.to_thread(get_active_system_ports, True)
@@ -968,9 +1463,8 @@ async def start_project(project_id: str):
     )
     if port_conflict:
         pid = port_conflict.get("pid")
-        # 如果占用方就是本面板管理的进程（即已在 ACTIVE_PROCESSES），允许
-        with PROC_LOCK:
-            is_managed = any(proc.pid == pid for proc in ACTIVE_PROCESSES.values() if pid)
+        # 如果占用方在本面板管理的进程树里（含子孙进程），允许
+        is_managed = bool(pid) and pid in _collect_managed_pids()
         if not is_managed:
             proc_name = port_conflict.get("process", "Unknown")
             raise HTTPException(
@@ -979,48 +1473,8 @@ async def start_project(project_id: str):
                     f"'{proc_name}' (PID {pid}). Stop it first or change the project's port.",
             )
 
-    log_path = os.path.join(LOGS_DIR, f"{project_id}.log")
-
     try:
-        log_file = open(log_path, "w", encoding="utf-8")
-        log_file.write(f"=== Starting project '{project['name']}' at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-        log_file.write(f"CWD: {cwd}\n")
-        log_file.write(f"Command: {' '.join(argv)}\n")
-        if env_overrides:
-            log_file.write(f"Env Overrides: {json.dumps(env_overrides, ensure_ascii=False)}\n")
-        log_file.write("===========================================================\n\n")
-        log_file.flush()
-
-        sub_env = os.environ.copy()
-        sub_env.update(env_overrides)
-        sub_env["PYTHONUNBUFFERED"] = "1"
-        sub_env["FORCE_COLOR"] = "1"
-
-        # Platform-specific process creation
-        if IS_WINDOWS:
-            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-            proc = subprocess.Popen(
-                argv,
-                cwd=cwd,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                env=sub_env,
-                creationflags=creation_flags,
-            )
-        else:
-            # Unix: use start_new_session to create new process group
-            proc = subprocess.Popen(
-                argv,
-                cwd=cwd,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                env=sub_env,
-                start_new_session=True,
-            )
-
-        with PROC_LOCK:
-            ACTIVE_PROCESSES[project_id] = proc
-            ACTIVE_LOG_FILES[project_id] = log_file
+        proc = _spawn_and_register(project, argv, env_overrides, log_mode="w")
 
         # Resolve startup timeout (clamp to 1..300s) and optional health URL.
         raw_timeout = project.get("startup_timeout_sec", 30)
@@ -1034,14 +1488,7 @@ async def start_project(project_id: str):
         ok, err = await _wait_for_startup(proc, timeout_sec, health_url)
         if not ok:
             _kill_active_proc(project_id, proc)
-            try:
-                log_file.write("\n[startup check FAILED] " + err + "\n")
-            except Exception:
-                pass
-            try:
-                log_file.close()
-            except Exception:
-                pass
+            append_log_line(project_id, "\n[startup check FAILED] " + err + "\n")
             raise HTTPException(
                 status_code=500,
                 detail=f"Project '{project['name']}' failed to become ready within {timeout_sec}s: {err}",
@@ -1051,10 +1498,16 @@ async def start_project(project_id: str):
         pids_map[project_id] = {
             "pid": proc.pid,
             "managed": True,
-            "started_at": int(time.time()),
+            # float 秒，供 _pid_matches_start 与 create_time 比对（PID 复用防护）
+            "started_at": time.time(),
         }
         save_running_pids(pids_map)
         invalidate_ports_cache()
+        # 手动启动解除看护抑制；期望状态在这里直接播种 —— 否则"两次巡检
+        # 之间启动又崩溃"的进程永远不会被观察到活着，watchdog 不会拉起它。
+        WATCHDOG_SUPPRESS.discard(project_id)
+        WATCHDOG_STATE[project_id] = {"pid": proc.pid, "up_since": time.time(),
+                                      "failures": 0, "next_retry_at": 0.0}
         return {"success": True, "pid": proc.pid, "message": f"Project '{project['name']}' started successfully"}
     except HTTPException:
         raise
@@ -1064,13 +1517,18 @@ async def start_project(project_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to start project: {str(e)}")
 
 
-@app.post("/api/projects/{project_id}/stop")
-def stop_project(project_id: str):
+@app.post("/api/projects/{project_id}/start")
+async def start_project(project_id: str):
     project_id = validate_project_id(project_id)
-    projects = load_projects()
-    project = next((p for p in projects if p["id"] == project_id), None)
+    project = next((p for p in load_projects() if p["id"] == project_id), None)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    return await _start_project_core(project)
+
+
+def _stop_project_core(project: dict) -> dict:
+    """停止单个托管项目（手动路由与场景编排共用）。"""
+    project_id = project["id"]
 
     current_state = next((p for p in get_projects_snapshot() if p["id"] == project_id), None)
     if current_state and current_state["status"] == "external":
@@ -1079,6 +1537,11 @@ def stop_project(project_id: str):
             "message": f"Project '{project['name']}' is currently running as an external process on port {project['port']}. Dashboard will not kill external processes automatically.",
             "external": True,
         }
+
+    # 用户主动停止：即使项目开着 auto_restart，watchdog 也不得再拉起，
+    # 直到下一次手动 start。未在运行的停止同样表达该意图。
+    WATCHDOG_SUPPRESS.add(project_id)
+    WATCHDOG_STATE.pop(project_id, None)
 
     pids_map = load_running_pids()
     entry = pids_map.get(project_id)
@@ -1109,6 +1572,15 @@ def stop_project(project_id: str):
     if success:
         return {"success": True, "message": f"Stopped managed project PID {pid}"}
     return {"success": False, "message": f"Could not stop managed process {pid} (it may have already exited)"}
+
+
+@app.post("/api/projects/{project_id}/stop")
+def stop_project(project_id: str):
+    project_id = validate_project_id(project_id)
+    project = next((p for p in load_projects() if p["id"] == project_id), None)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _stop_project_core(project)
 
 
 @app.get("/api/projects/{project_id}/logs")
@@ -1162,13 +1634,27 @@ async def stream_logs(project_id: str):
 
 
 async def _sse_event_generator(log_path: str, project_id: str):
-    """Tail-follow a log file, yielding SSE-formatted lines for each new chunk."""
+    """Tail-follow a log file, yielding SSE-formatted lines for each new chunk.
+
+    行缓冲：按字节边界读到的 chunk 可能把一行从中间截断，直接 splitlines
+    会把半行当整行推给前端。这里把不带换行的尾巴攒到下一轮再发；
+    单行超过 64KB（畸形输出）时强制冲刷，防止内存无界。
+    """
     last_pos = _initial_log_position(log_path)
     if last_pos is None:
         yield f"data: [synthetic] log file not found for {project_id}\n\n"
         return
 
+    pending = b""
     while True:
+        # 日志被截断重写（如 clear）时 last_pos 会大于文件大小，从头继续跟
+        try:
+            if os.path.getsize(log_path) < last_pos:
+                last_pos = 0
+                pending = b""
+        except OSError:
+            pass
+
         chunk = await _read_new_chunk(log_path, last_pos)
         if chunk is None:
             await asyncio.sleep(0.5)
@@ -1176,9 +1662,20 @@ async def _sse_event_generator(log_path: str, project_id: str):
         new_data, current_pos = chunk
         if new_data:
             last_pos = current_pos
-            for line in _iter_lines(new_data):
-                yield f"data: {line}\n\n"
+            pending += new_data
+            lines = pending.split(b"\n")
+            pending = lines.pop()  # 最后一段是没有 \n 的尾巴，等下一轮
+            for raw in lines:
+                yield f"data: {_decode_sse_line(raw)}\n\n"
+            if len(pending) > LOG_READ_CHUNK_SIZE:
+                yield f"data: {_decode_sse_line(pending)}\n\n"
+                pending = b""
         await asyncio.sleep(0.5)
+
+
+def _decode_sse_line(raw: bytes) -> str:
+    """Decode one raw log line into a single-line SSE-safe string."""
+    return raw.decode("utf-8", errors="ignore").replace(chr(13), "").replace("\n", "\\n")
 
 
 def _initial_log_position(log_path: str):
@@ -1200,14 +1697,6 @@ async def _read_new_chunk(log_path: str, last_pos: int):
             return data, f.tell()
     except (FileNotFoundError, OSError):
         return None
-
-
-def _iter_lines(data: bytes):
-    """Decode bytes and yield each line as a single-line SSE-safe string."""
-    text = data.decode("utf-8", errors="ignore")
-    for line in text.splitlines():
-        # Strip CR and escape any embedded newlines so each yield is a single line.
-        yield line.replace(chr(13), "").replace("\n", "\\n")
 
 
 @app.post("/api/projects/{project_id}/logs/clear")

@@ -11,3 +11,5 @@ projects.json.bak-*
 projects.json.pre-pull-backup
 running_pids.json.pre-pull-backup
 static/vue.global.prod.js
+scenes.json
+

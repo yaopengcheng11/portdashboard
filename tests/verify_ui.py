@@ -590,6 +590,95 @@ async def run(phase, baseline, keep_shots):
             else:
                 print("[P8] toast 容器存在")
 
+        # --- P9：扫描导入弹窗（发现 → 已在管禁选 → 勾选导入） ---
+        if phase >= 9:
+            import_posts = []
+            await page.route("**/api/discover*", lambda r: asyncio.ensure_future(r.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"root": "G:/AITOOLS", "candidates": [
+                    {"cwd": "G:/AITOOLS/demo-web", "name": "demo-web", "kind": "vite",
+                     "command": "npm run dev", "port": 5173, "port_source": "vite default",
+                     "id_hint": "demo-web", "already_managed": False},
+                    {"cwd": "G:/AITOOLS/nexart", "name": "NexArt AI Workflow", "kind": "vite",
+                     "command": "npm run dev", "port": 6677, "port_source": ".env PORT",
+                     "id_hint": "nexart", "already_managed": True},
+                ]}))))
+            await page.route("**/api/projects", lambda r: (
+                import_posts.append(r.request.post_data) if r.request.method == "POST" else None,
+                asyncio.ensure_future(r.fulfill(
+                    status=200, content_type="application/json",
+                    body=json.dumps({"success": True})))
+            )[-1])
+
+            await set_tab(page, "managed")
+            await page.locator('button[title="扫描目录，批量发现可托管的项目"]').click()
+            root_input = page.locator('.pd-modal input[placeholder="e.g. G:/AITOOLS"]')
+            await root_input.fill("G:/AITOOLS")
+            await page.locator('.pd-modal button:has-text("扫描")').click()
+            await page.wait_for_timeout(400)
+
+            boxes = page.locator('.pd-modal input[type="checkbox"]')
+            rows = await boxes.count()
+            print(f"[P9] 扫描结果行: {rows}")
+            if rows != 2:
+                failures.append(f"扫描应列出 2 个候选，实际 {rows}")
+            disabled = await page.locator('.pd-modal input[type="checkbox"][disabled]').count()
+            if disabled != 1:
+                failures.append(f"already_managed 候选应禁选（实际禁选 {disabled} 个）")
+
+            await page.locator('.pd-modal input[type="checkbox"]:not([disabled])').first.check()
+            await page.locator('.pd-modal button:has-text("导入所选")').click()
+            await page.wait_for_timeout(500)
+
+            if not import_posts:
+                failures.append("导入所选未发出 POST /api/projects")
+            else:
+                body = json.loads(import_posts[0])
+                print(f"[P9] 导入 payload id={body.get('id')} port={body.get('port')}")
+                if body.get("id") != "demo-web" or body.get("port") != 5173:
+                    failures.append(f"导入 payload 不符: {body}")
+            modal_gone = await root_input.count() == 0
+            if not modal_gone:
+                failures.append("导入后弹窗未关闭")
+
+        # --- P10：场景弹窗（列表 → 状态徽章 → 删除走自建对话框契约） ---
+        if phase >= 10:
+            scene_deletes = []
+            await page.route("**/api/scenes", lambda r: asyncio.ensure_future(r.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps([{"id": "client-work", "name": "客户项目开发", "up_count": 1, "total": 2,
+                                  "steps": [{"project_id": "web", "name": "Web 前端", "state": "managed"},
+                                            {"project_id": "api", "name": "API 服务", "state": "stopped"}]}]))))
+            await page.route("**/api/scenes/*", lambda r: (
+                scene_deletes.append(r.request.method) if r.request.method == "DELETE" else None,
+                asyncio.ensure_future(r.fulfill(
+                    status=200, content_type="application/json",
+                    body=json.dumps({"success": True})))
+            )[-1])
+
+            await page.locator('button[title="场景：按依赖顺序一键启停一组项目"]').click()
+            await page.wait_for_timeout(400)
+
+            row = page.locator('.pd-modal .pd-row').first
+            row_text = await row.inner_text()
+            print(f"[P10] 场景行: {row_text.split(chr(10))[0]} | 按钮 {await page.locator('.pd-modal .pd-row button').count()}")
+            if "客户项目开发" not in row_text or "1/2" not in row_text:
+                failures.append(f"场景行渲染不符: {row_text[:80]}")
+            if not await page.locator('.pd-modal select option').count() >= 3:
+                failures.append("新建场景的项目下拉没有列出托管项目")
+
+            # 删除场景必须走 P8 的自建对话框契约（Esc 取消 / Enter 确认）
+            await page.locator('.pd-modal button[title="删除场景"]').click()
+            await page.wait_for_timeout(300)
+            dialog_open = await page.locator(".pd-dialog").count() == 1
+            await page.keyboard.press("Enter")
+            await page.wait_for_timeout(400)
+            print(f"[P10] 删除确认对话框: {dialog_open}，DELETE 次数: {len(scene_deletes)}")
+            if not dialog_open:
+                failures.append("删除场景未弹出确认对话框")
+            if not scene_deletes:
+                failures.append("确认后未发出 DELETE /api/scenes/*")
+
         print(f"\n[通用] 控制台错误 ({len(errors)}):")
         for e in errors[:6]:
             print("  ", e)

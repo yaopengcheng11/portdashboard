@@ -8,8 +8,11 @@
 
 ### 🖥️ 项目生命周期管理
 - **多标签页界面**：托管项目 / 本地端口 / 全局端口
+- **场景（Scenes）** — 把若干项目按依赖顺序编组（后端在前），一键顺序启动（健康检查逐个放行、失败即中止）、逆序批量停止；已在跑或外部托管的步骤自动跳过
+- **扫描导入** — 指定根目录一键扫描（识别 package.json dev/start script、带 Web 依赖的 Python 入口），端口从 `.env` / vite·next·nuxt 配置 / 脚本参数推断，勾选批量导入
 - 创建、编辑、删除托管项目（Vite、React、Python FastAPI、Node 等）
 - 一键启动/关闭，跨平台进程树终止（Windows `taskkill` / Unix `kill -9`）
+- **崩溃看护（可选）** — 项目开启 `auto_restart` 后，意外退出（崩溃/误杀）会被自动拉起，失败按 5–60 秒指数退避；手动「停止」不会被重启
 - **启动前端口冲突预检** — 自动识别外部进程占用，拒绝启动并提示
 - **启动超时 + 健康检查** — 可配置 `startup_timeout_sec` 与 `health_check_url`，启动失败自动清理
 - 断电重启后自动通过 PID 重新接管之前由面板启动的进程
@@ -89,8 +92,8 @@
 
 ```
 portdashboard/
-├── app.py                      # FastAPI 后端主程序（1188 行）
-│   ├── API 路由（19 个 endpoint）
+├── app.py                      # FastAPI 后端主程序（~1870 行）
+│   ├── API 路由（23 个 endpoint：项目 / 端口 / 日志 / 偏好 / 发现 / 场景）
 │   ├── 进程管理（start/stop/terminate）
 │   ├── 项目 CRUD + 持久化
 │   ├── 日志管理（SSE 流式 + 历史）
@@ -101,6 +104,8 @@ portdashboard/
 │   ├── parse_listening_ports() # 跨平台 netstat 解析
 │   └── _parse_windows_listening / _parse_unix_listening
 │
+├── discovery.py                # 项目自动发现：扫目录识别可托管仓库 + 端口推断
+├── scenes.json                 # 场景配置（用户数据，gitignore）
 ├── http_probe.py               # HTTP 服务探测模块（125 行）—— 真 web 内容判定
 │   ├── check_http_port()       # 入口
 │   ├── _send_request_and_read  # TCP socket I/O
@@ -113,9 +118,11 @@ portdashboard/
 ├── templates/index.html        # 前端界面（Vue 3 + 自包含 CSS 设计系统）
 ├── static/fonts/*.woff2        # JetBrains Mono 子集（本地托管）
 ├── requirements-dev.txt        # UI 验证脚手架依赖（pytest + playwright + pillow）
-├── tests/test_app.py           # 后端单元测试（端口扫描 / IPv6 / 进程去重 / 启动解析 / 真机烟雾）
+├── tests/test_app.py           # 后端单元测试（端口扫描 / IPv6 / 进程去重 / 启动解析 / 看护退避）
+├── tests/test_discovery.py     # 自动发现单测（端口推断优先级 / 深度限制 / 噪声目录）
 ├── tests/verify_ui.py          # Playwright 分阶段 UI 断言（7 主题 × 3 标签页截图、tone 分色、键盘契约等）
 ├── logs/*.log                  # 各项目的运行日志
+├── mcp-server/                 # MCP Server：把面板 API 包装成 agent 可用的 tools
 └── agent-harness/              # CLI 工具和测试（独立子项目）
 ```
 
@@ -199,6 +206,16 @@ start.bat dev      # 开发模式（热重载）
 | `/api/projects/{id}/start` | POST | 启动项目（含端口预检 + 健康检查） |
 | `/api/projects/{id}/stop` | POST | 停止项目 |
 
+### 场景（Scenes）
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/scenes` | GET | 场景列表（含每步状态与 up_count） |
+| `/api/scenes` | POST | 创建场景 `{name, steps}`，steps 去重保序即启动顺序 |
+| `/api/scenes/{id}` | PUT / DELETE | 更新 / 删除场景 |
+| `/api/scenes/{id}/start` | POST | 按顺序启动：managed/external 步骤跳过，失败即中止并返回逐步结果 |
+| `/api/scenes/{id}/stop` | POST | 按相反顺序停止 |
+
 ### 日志
 
 | 端点 | 方法 | 说明 |
@@ -229,6 +246,7 @@ class Project(BaseModel):
     port: int                   # 期望监听的端口（启动时预检）
     description: Optional[str]  # 描述
     sync_name: bool = False     # 自动从 package.json 同步 name
+    auto_restart: bool = False  # 意外退出时自动重启（看护）
 
     # v2026.07 — 启动控制
     startup_timeout_sec: int = 30   # 启动超时（1..300 秒）
@@ -347,8 +365,8 @@ launchctl load ~/Library/LaunchAgents/com.portdashboard.plist
                    │ HTTP + SSE
                    ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  FastAPI app (app.py — 1188 行)                              │
-│  • 19 个 endpoint · DynamicCORSMiddleware · lifespan hook   │
+│  FastAPI app (app.py — ~1870 行)                             │
+│  • 23 个 endpoint · DynamicCORSMiddleware · lifespan hook   │
 │  • 端口预检 · 健康检查 · SSE 日志流                          │
 └──────┬────────────────────────┬─────────────────────────────┘
        │                        │
@@ -375,7 +393,7 @@ launchctl load ~/Library/LaunchAgents/com.portdashboard.plist
 
 | 指标 | 数值 |
 |------|------|
-| 后端模块总 LOC | ~1500 行 |
+| 后端模块总 LOC | ~2300 行（app.py + port_parser + http_probe + discovery） |
 | `app.py` 最大函数 cognitive | 39（`start_project`） |
 | 跨文件 helper 数 | 9 |
 | 跨文件 CALLS 边（cbm 索引） | 1300 |
@@ -400,6 +418,10 @@ agent-harness/
 
 CLI 客户端可独立运行，提供与 Web dashboard 等价的命令式操作。
 
+`mcp-server/` 是配套的 **MCP Server**：把面板 API 包装成 14 个 MCP tools（含场景启停），
+让 ZCode / Claude 等 coding agent 可以直接扫端口、启停托管项目、读日志。
+安装与注册方式见 [`mcp-server/README.md`](./mcp-server/README.md)。
+
 ---
 
 ## 许可证
@@ -409,6 +431,79 @@ MIT License
 ---
 
 ## 更新日志
+
+### v2026.09 — 安全修复 + 进程树感知 + MCP Server
+
+**安全:**
+- 🔒 **start.sh 不再绕过 loopback 安全默认** —— 之前 `./start.sh` 硬编码 `--host 0.0.0.0`，
+  把 v2026.07-4 的「默认只绑 127.0.0.1」完全绕过（未鉴权的 kill/start API 暴露给整个局域网）。
+  现在统一 `exec python3 app.py`，绑定地址与端口解析同 start.bat 完全一致；
+  `dev` 参数与 `--reload` 都识别热重载（README 此前写的 `./start.sh dev` 现在真的生效了）
+- 🔒 **项目 ID 校验收紧** —— id 会被用作日志文件名，现要求 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，
+  显式拒绝 Windows 保留设备名（con/nul/aux…，即使带 .log 也指向设备）与 `:`（NTFS 备用数据流）；
+  `create_project` 此前是唯一不校验 id 的写入口，现已补上
+
+**关键 bug fix:**
+- 🐛 **Windows 上 npm/npx/vite 项目全部无法启动** —— list 形式 Popen 不按 PATHEXT 解析
+  .cmd shim，README 自己的示例命令 `npm run dev` 直接 FileNotFoundError。
+  启动前现在用 `shutil.which` 解析出真实可执行路径
+- 🐛 **`dashboard_project` 标记在 Windows 上经常为 None** —— 启动链有中间层时
+  （WindowsApps 存根、npm.cmd→cmd.exe→node），真正监听端口的 PID 是托管进程的
+  **子孙**而非 Popen 直接子进程。标记与启动端口预检都改为进程树感知匹配
+- 🐛 **PID 复用误认领** —— 认领只检查 pid_exists，PID 被无关进程复用后项目会显示
+  running (Adopted)，停止时就会误杀。注册表现在写入 float `started_at`，
+  认领与运行态判定都比对 psutil `create_time()`（旧格式无时间戳的条目放行，向后兼容）
+- 🐛 **Unix 停止虚报成功** —— killpg 后无条件 `return True`。现在 SIGTERM →
+  等待 3s → 超时升级 SIGKILL，按真实结果返回；`_kill_process_tree` 对已退出的
+  目标返回 True（视为成功）而非 False
+- 🐛 **`PUT /api/projects/{id}` 身份可被 body 篡改** —— body 的 id 与路径不一致时会整体
+  写回，ACTIVE_PROCESSES / running_pids / 日志文件全部挂在旧 id 上变孤儿。现在以路径 id 为准
+
+**其他修复:**
+- 🐛 中文 Windows 上 tasklist/netstat 输出按 GBK 解码（此前 utf-8 + ignore 会吃掉非 ASCII 进程名）
+- 🐛 端口缓存返回浅拷贝，下游 `group_ports_by_process` 的 is_http 回写与并发 JSON
+  序列化存在竞态 —— 改为逐条 dict 拷贝
+- 🐛 projects.json 损坏时静默返回空表，下次保存会覆盖原始数据 —— 现在改名隔离为
+  `projects.json.corrupt-<ts>`
+- 🐛 SSE 日志流在 chunk 边界把一行拆成两条事件 —— 加跨 chunk 行缓冲；
+  日志被 clear 截断后从头部继续跟随（此前会永久静默）
+- 🎨 新建/导入项目表单不再预填无效的 WSL 旧路径；日志面板仅当滚动位置在底部附近才自动跟随
+- 🧹 CLI `api_get` 补齐与其余动词一致的 4xx 处理（此前直接抛 traceback）；
+  删除 `categorize_process` 从未使用的 `ports` 参数
+
+**新功能:**
+- ✨ **MCP Server**（`mcp-server/`）—— 把面板 API 包装成 14 个 MCP tools
+  （scan_ports / start / stop / tail_logs / scenes / kill…），coding agent 可直接操作面板。
+  stdio transport，独立 venv，注册方式见 [mcp-server/README.md](./mcp-server/README.md)
+- ✨ **启动场景（Scenes）** —— `scenes.json` 持久化 `{id, name, steps}`（steps 去重保序即启动顺序）。
+  `POST /api/scenes/{id}/start` 逐个启动：已在托管运行（managed）或端口被外部服务（external）
+  的步骤视为就绪跳过；某步失败立即中止（依赖语义），响应带逐步 results；停止按相反顺序。
+  手动启动/停止路由重构为 `_start_project_core` / `_stop_project_core` 与场景共用同一条
+  （预检、健康检查、看护播种全部继承）。托管页新增「场景」弹窗：状态徽章（n/m 运行中）、
+  顺序 chips 新建表单、删除走自建对话框契约
+- ✨ **扫描导入（项目自动发现）** —— 新模块 `discovery.py` + `GET /api/discover?root=...`。
+  扫描根目录（含自身，深度可调，跳过 node_modules/.git/构建产物），识别两类项目：
+  package.json 带 dev/start script 的 Node 项目；带 fastapi/uvicorn/flask 依赖 +
+  app/main/server.py 入口的 Python 项目。端口推断优先级：`.env` 的 PORT >
+  vite/next/nuxt/webpack 配置里的显式 port > 脚本里的 `--port/-p` > 框架默认值
+  （vite 5173 / next·nuxt 3000 / web 8000）。托管页新增「扫描导入」弹窗：
+  候选列表内联改命令/端口、已在管项目自动禁选、勾选批量导入（id 冲突自动改名重试）
+- ✨ **崩溃看护** —— 项目新增 `auto_restart` 开关（项目表单复选框）。开启后 watchdog
+  后台线程每 5s 巡检：托管进程意外退出即自动拉起，失败按 5/10/20/40/60s 指数退避，
+  连续存活 60s 清零；手动停止/删除会被抑制（直到下次手动启动）；重启前做端口预检，
+  端口仍被外部占用时暂停并记日志。期望状态在手动启动成功时播种，
+  避免两次巡检之间"启动即崩"的进程永远无法被观察到。所有动作写入项目日志（`[watchdog]` 前缀）
+
+**验证:**
+- ✅ `tests/test_app.py` + `tests/test_discovery.py` 合计 54 passed（id 校验 / PID 复用防护 /
+  可执行解析 / 看护退避 / 发现推断优先级 / 场景步骤去重）
+- ✅ MCP stdio 握手（14 tools）+ 真机端到端（建项目→启动→扫端口→读日志→停止→删除）全链路通过
+- ✅ 看护真机 E2E：杀整棵进程树 → 5s 内自动拉起（新 PID 监听）→ 日志含 `[watchdog]` →
+  手动停止后 16s 确认不再被拉起
+- ✅ 场景真机 E2E：顺序启动两端口监听 → 重复启动跳过 → 逆序停止全下线 → scenes.json 持久化
+- ✅ 真机扫描 `G:/AITOOLS`：发现 12 个候选，端口推断逐项可溯源（.env / vite.config / script flag）
+- ✅ `tests/verify_ui.py --phase 10` 全部通过（P9 扫描导入 + P10 场景弹窗断言；
+  tone 分色 / sticky 表头 / 对话框键盘契约 / 零控制台错误）
 
 ### v2026.07-4 — 安全收紧 + 快照去重
 
