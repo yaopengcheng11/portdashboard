@@ -32,7 +32,8 @@ from port_parser import (
     format_addr,
 )
 from http_probe import check_http_port as _check_http_port_impl
-from discovery import discover_projects as _discover_projects, slugify_project_id
+from discovery import discover_projects as _discover_projects, slugify_project_id, \
+    detect_project_groups as _detect_project_groups
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
@@ -1164,7 +1165,13 @@ def discover_projects_api(root: str, max_depth: int = 2):
     for candidate in candidates:
         candidate["already_managed"] = \
             os.path.normcase(os.path.normpath(candidate["cwd"])) in managed_cwds
-    return {"root": root_path, "candidates": candidates}
+    # 配套组合建议：前端配置里的端口引用 + 命名配套（steps 为 id_hint；
+    # name 一并喂 id_hint —— 显示名可能是中文，剥不出角色后缀）
+    groups = _detect_project_groups([
+        {"id": c["id_hint"], "name": c["id_hint"], "cwd": c["cwd"], "port": c["port"]}
+        for c in candidates
+    ])
+    return {"root": root_path, "candidates": candidates, "groups": groups}
 
 
 @app.put("/api/projects/{project_id}")
@@ -1286,6 +1293,31 @@ def get_scenes_api():
         out.append({"id": scene["id"], "name": scene.get("name", scene["id"]),
                     "steps": steps, "up_count": up, "total": len(steps)})
     return out
+
+
+@app.get("/api/scenes/suggest")
+def suggest_scenes():
+    """自动检测"要一起启动才能用"的项目组合。
+
+    信号：前端配置/.env 指向其他项目端口的 localhost 引用（vite proxy、
+    API_URL…），以及去掉 -api/-web 等角色后缀后的同名项目。
+    """
+    projects = load_projects()
+    port_by_id = {p["id"]: p.get("port") for p in projects}
+    name_by_id = {p["id"]: p.get("name") or p["id"] for p in projects}
+    # 命名配套必须喂 slug（id）：显示名可能是中文，剥不出 -api/-web 后缀
+    groups = _detect_project_groups([
+        {"id": p["id"], "name": p["id"], "cwd": p.get("cwd") or "",
+         "port": p.get("port")}
+        for p in projects
+    ])
+    out = []
+    for g in groups:
+        steps = [{"project_id": pid, "name": name_by_id.get(pid, pid),
+                  "state": _scene_step_state(pid, port_by_id.get(pid))}
+                 for pid in g["steps"]]
+        out.append({"name": g["name"], "reason": g["reason"], "steps": steps})
+    return {"groups": out}
 
 
 @app.post("/api/scenes")

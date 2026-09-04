@@ -679,6 +679,54 @@ async def run(phase, baseline, keep_shots):
             if not scene_deletes:
                 failures.append("确认后未发出 DELETE /api/scenes/*")
 
+        # --- P11：场景自动检测建议（打开即检测 → 建议卡 → 一键创建） ---
+        if phase >= 11:
+            scene_posts = []
+            await page.route("**/api/scenes/suggest", lambda r: asyncio.ensure_future(r.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"groups": [
+                    {"name": "demo-suite", "reason": "port-ref", "steps": [
+                        {"project_id": "api", "name": "API 服务", "state": "stopped"},
+                        {"project_id": "web", "name": "Web 前端", "state": "stopped"},
+                    ]},
+                ]}))))
+
+            async def _scenes_route(route):
+                req = route.request
+                if req.method == "POST":
+                    scene_posts.append(req.post_data)
+                    await route.fulfill(status=200, content_type="application/json",
+                                        body=json.dumps({"success": True, "scene": {"id": "demo-suite"}}))
+                else:
+                    await route.fulfill(status=200, content_type="application/json", body=json.dumps([]))
+
+            await page.route("**/api/scenes", lambda r: asyncio.ensure_future(_scenes_route(r)))
+
+            await page.keyboard.press("Escape")     # 关掉 P10 遗留的场景弹窗
+            await page.wait_for_timeout(250)
+            await page.locator('button[title="场景：按依赖顺序一键启停一组项目"]').click()
+            await page.wait_for_timeout(450)
+
+            card = page.locator('.pd-modal .pd-row:has-text("demo-suite")')
+            card_text = await card.inner_text()
+            print(f"[P11] 建议卡: {card_text.split(chr(10))[0]}")
+            if "demo-suite" not in card_text or "端口引用" not in card_text:
+                failures.append(f"建议卡渲染不符: {card_text[:80]}")
+            if "API 服务 → Web 前端" not in card_text:
+                failures.append(f"建议卡顺序不符（应为 依赖 → 前端）: {card_text[:80]}")
+
+            await card.locator('button:has-text("创建场景")').click()
+            await page.wait_for_timeout(400)
+            if not scene_posts:
+                failures.append("创建场景未发出 POST /api/scenes")
+            else:
+                body = json.loads(scene_posts[0])
+                print(f"[P11] 创建 payload: name={body.get('name')} steps={body.get('steps')}")
+                if body.get("name") != "demo-suite" or body.get("steps") != ["api", "web"]:
+                    failures.append(f"创建 payload 不符: {body}")
+            if await card.count() != 0:
+                failures.append("创建成功后建议卡未消失")
+
         print(f"\n[通用] 控制台错误 ({len(errors)}):")
         for e in errors[:6]:
             print("  ", e)

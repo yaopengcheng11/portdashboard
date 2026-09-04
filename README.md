@@ -8,7 +8,7 @@
 
 ### 🖥️ 项目生命周期管理
 - **多标签页界面**：托管项目 / 本地端口 / 全局端口
-- **场景（Scenes）** — 把若干项目按依赖顺序编组（后端在前），一键顺序启动（健康检查逐个放行、失败即中止）、逆序批量停止；已在跑或外部托管的步骤自动跳过
+- **场景（Scenes）** — 把若干项目按依赖顺序编组（后端在前），一键顺序启动（健康检查逐个放行、失败即中止）、逆序批量停止；已在跑或外部托管的步骤自动跳过。**配套组合自动检测**：依据前端配置/.env 里指向彼此端口的 localhost 引用（vite proxy、API_URL…）与去角色后缀后的同名项目，自动建议场景——扫描导入可一键"导入并建场景"，场景弹窗对已托管项目自动检测
 - **扫描导入** — 指定根目录一键扫描（识别 package.json dev/start script、带 Web 依赖的 Python 入口），端口从 `.env` / vite·next·nuxt 配置 / 脚本参数推断，勾选批量导入
 - 创建、编辑、删除托管项目（Vite、React、Python FastAPI、Node 等）
 - 一键启动/关闭，跨平台进程树终止（Windows `taskkill` / Unix `kill -9`）
@@ -224,6 +224,7 @@ start.bat dev      # 开发模式（热重载）
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/scenes` | GET | 场景列表（含每步状态与 up_count） |
+| `/api/scenes/suggest` | GET | 自动检测配套组合（端口引用 + 命名配套，拓扑排序） |
 | `/api/scenes` | POST | 创建场景 `{name, steps}`，steps 去重保序即启动顺序 |
 | `/api/scenes/{id}` | PUT / DELETE | 更新 / 删除场景 |
 | `/api/scenes/{id}/start` | POST | 按顺序启动：managed/external 步骤跳过，失败即中止并返回逐步结果 |
@@ -444,6 +445,22 @@ MIT License
 ---
 
 ## 更新日志
+
+### v2026.09-2 — 配套组合自动检测
+
+- 🔎 **检测引擎**（`discovery.detect_project_groups`）—— 识别"要一起启动才能用"的项目：
+  ① **端口引用**：项目配置/.env 里指向另一项目端口的 localhost URL（vite proxy target、
+  next rewrite、`API_URL=http://localhost:8789`、`BACKEND_PORT=…` 等），连通分量即一组；
+  ② **命名配套**：去掉 `-api/-web/-server/-client/-dashboard` 等角色后缀后同名的落单项目。
+  组内拓扑排序（被依赖的在前，Kahn + 端口次序，有环兜底）
+- 🧩 **两个入口**：扫描导入结果直接给出「导入并建场景」一键流（已托管成员自动并入场景、
+  id 冲突自动改名）；场景弹窗打开时对已托管项目**自动检测**，建议卡一键创建（已存在同
+  步骤的场景自动跳过）
+- 🐛 **端口歧义防护**：多个项目声明同一端口（都吃 vite 默认 5173）时该端口不参与依赖
+  归因，避免假依赖边；命名分组一律基于 slug（id/id_hint），中文显示名不再漏配
+- ✅ 真机验证：`G:/AITOOLS` 正确检出 `cg-resource-hub-api → cg-resource-hub-web`
+  （端口引用）与 `estudio-api → estudio`（同名）；已托管项目检出 hermes 对子；
+  pytest 80 passed（+6 检测用例）；verify_ui 新增 P11 并全过
 
 ### v2026.09-1 — macOS/Linux 一等公民
 

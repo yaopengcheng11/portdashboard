@@ -2715,6 +2715,29 @@ function applyTheme(themeId) {
                        :disabled="c.already_managed" placeholder="端口" aria-label="端口">
               </div>
             </div>
+            <div v-if="discoverGroups.length" class="pd-field"
+                 style="border-top:1px solid var(--st-line-soft); padding-top:12px;">
+              <label class="pd-label">检测到配套组合</label>
+              <div v-for="g in discoverGroups" :key="g.name" class="pd-row"
+                   style="align-items:center; gap:10px; padding:7px 10px; border:1px solid var(--st-line-soft); border-radius:8px;">
+                <div class="pd-grow" style="min-width:0;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <strong style="font-size:12px;">{{ g.name }}</strong>
+                    <span class="pd-badge" data-tone="info">{{ g.reason === 'port-ref' ? '端口引用' : '同名配套' }}</span>
+                    <span class="pd-badge" data-tone="muted">{{ g.steps.length }} 个项目</span>
+                  </div>
+                  <div style="font-size:11px; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                    {{ groupCandidateNames(g) }}
+                  </div>
+                </div>
+                <button @click="importGroupAsScene(g)" class="pd-btn pd-btn--sm pd-btn--solid"
+                        data-tone="accent" style="flex:none;">导入并建场景</button>
+              </div>
+              <p class="pd-field__note">
+                依据：项目配置/.env 里指向彼此端口的 localhost 引用（vite proxy、API_URL…），
+                以及去掉 -api/-web 等后缀后的同名项目。一键导入并按依赖顺序建好场景。
+              </p>
+            </div>
           </div>
         </div>
 
@@ -2746,8 +2769,30 @@ function applyTheme(themeId) {
         <div class="pd-modal__body">
           <div class="pd-form">
             <p v-if="!scenes.length" class="pd-field__note">
-              还没有场景。在下方创建一个：选好项目、按依赖顺序添加（后端在前），之后一键整组启停。
+              还没有场景。可以点「自动检测」从已托管项目里找配套组合，或在下方手动创建。
             </p>
+
+            <div v-if="sceneSuggestions.length" class="pd-field">
+              <label class="pd-label">检测到的配套组合</label>
+              <div v-for="g in sceneSuggestions" :key="g.name" class="pd-row"
+                   style="align-items:center; gap:10px; padding:7px 10px; border:1px solid var(--st-line-soft); border-radius:8px;">
+                <div class="pd-grow" style="min-width:0;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <strong style="font-size:12px;">{{ g.name }}</strong>
+                    <span class="pd-badge" data-tone="info">{{ g.reason === 'port-ref' ? '端口引用' : '同名配套' }}</span>
+                    <span v-if="suggestionExists(g)" class="pd-badge" data-tone="muted">已有场景</span>
+                  </div>
+                  <div style="font-size:11px; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                    {{ g.steps.map(s => s.name).join(' → ') }}
+                  </div>
+                </div>
+                <button class="pd-btn pd-btn--sm pd-btn--solid" data-tone="accent" style="flex:none;"
+                        :disabled="suggestionExists(g)" @click="createSceneFromSuggestion(g)">创建场景</button>
+              </div>
+              <p class="pd-field__note">
+                依据：项目配置/.env 里指向彼此端口的 localhost 引用，以及去掉 -api/-web 等后缀后的同名项目。
+              </p>
+            </div>
 
             <div v-for="sc in scenes" :key="sc.id" class="pd-row"
                  style="align-items:center; gap:10px; padding:7px 10px; border:1px solid var(--st-line-soft); border-radius:8px;">
@@ -2949,6 +2994,7 @@ function applyTheme(themeId) {
         const discoverRoot = ref(localStorage.getItem('discoverRoot') || '');
         const discovering = ref(false);
         const discoverCandidates = ref([]);
+        const discoverGroups = ref([]);
         const discoverSelection = ref({});
         const discoverError = ref('');
 
@@ -2971,9 +3017,11 @@ function applyTheme(themeId) {
             if (!res.ok) {
               discoverError.value = data.detail || `HTTP ${res.status}`;
               discoverCandidates.value = [];
+              discoverGroups.value = [];
               return;
             }
             discoverCandidates.value = data.candidates || [];
+            discoverGroups.value = data.groups || [];
             const sel = {};
             for (const c of discoverCandidates.value) sel[c.cwd] = false;
             discoverSelection.value = sel;
@@ -2992,6 +3040,83 @@ function applyTheme(themeId) {
           discoverSelection.value[c.cwd] = !discoverSelection.value[c.cwd];
         };
 
+        /* 统一的"创建项目（id 冲突自动改名重试）"，普通导入与组合导入共用 */
+        const postProject = async (id, payload) => {
+          const res = await fetch('/api/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, ...payload })
+          });
+          if (res.ok) return true;
+          const err = await res.json().catch(() => ({}));
+          return { detail: err.detail || `HTTP ${res.status}` };
+        };
+        const importWithConflictRetry = async (c) => {
+          /* 成功返回最终 id；失败返回 null 并把原因写到 c._error */
+          const payload = {
+            name: c.name, cwd: c.cwd, command: c.command, port: c.port,
+            description: `自扫描导入（${c.kind}）`, sync_name: true, auto_restart: false
+          };
+          let result = await postProject(c.id_hint, payload);
+          if (result === true) return c.id_hint;
+          if (/exists/i.test(result.detail || '')) {
+            const alt = `${c.id_hint}-${Date.now().toString().slice(-4)}`;
+            if (await postProject(alt, payload) === true) return alt;
+          }
+          c._error = result.detail;
+          return null;
+        };
+
+        const groupCandidateNames = (g) => {
+          const byHint = {};
+          for (const c of discoverCandidates.value) byHint[c.id_hint] = c;
+          return g.steps.map(h => (byHint[h] ? byHint[h].name : h)).join(' → ');
+        };
+
+        /* 一键：把一组配套候选按依赖顺序导入，并直接建好场景 */
+        const importGroupAsScene = async (g) => {
+          const byHint = {};
+          for (const c of discoverCandidates.value) byHint[c.id_hint] = c;
+          const normCwd = (s) => (s || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+          const stepIds = [];
+          const failed = [];
+          let imported = 0;
+          for (const hint of g.steps) {
+            const c = byHint[hint];
+            if (!c) continue;
+            const existing = projects.value.find(p => normCwd(p.cwd) === normCwd(c.cwd));
+            if (existing) { stepIds.push(existing.id); continue; }   // 已在管：直接进场景
+            if (!canImportCandidate(c)) { failed.push(`${c.name}: 缺端口或命令`); continue; }
+            const finalId = await importWithConflictRetry(c);
+            if (finalId) { stepIds.push(finalId); imported += 1; }
+            else failed.push(`${c.name}: ${c._error}`);
+          }
+          let sceneCreated = false;
+          if (stepIds.length >= 2) {
+            try {
+              const res = await fetch('/api/scenes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: g.name, steps: stepIds })
+              });
+              sceneCreated = res.ok;
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                failed.push(`场景「${g.name}」: ${err.detail || res.status}`);
+              }
+            } catch (e) {
+              failed.push(`场景「${g.name}」: ${e.message}`);
+            }
+          }
+          discoverGroups.value = discoverGroups.value.filter(x => x !== g);
+          await refreshDashboard(true);
+          notifyDialog(
+            `已导入 ${imported} 个项目` +
+            (sceneCreated ? `，场景「${g.name}」已创建（顺序 = 依赖顺序）` : '') +
+            (failed.length ? `\n\n未完成：\n${failed.join('\n')}` : ''),
+            { tone: failed.length ? 'warn' : 'ok', title: g.name });
+        };
+
         const importDiscovered = async () => {
           const picked = discoverCandidates.value.filter(
             c => discoverSelection.value[c.cwd] && !c.already_managed && canImportCandidate(c));
@@ -2999,25 +3124,8 @@ function applyTheme(themeId) {
           let ok = 0;
           const failed = [];
           for (const c of picked) {
-            const payload = {
-              name: c.name, cwd: c.cwd, command: c.command, port: c.port,
-              description: `自扫描导入（${c.kind}）`, sync_name: true, auto_restart: false
-            };
-            const attempt = async (id) => {
-              const res = await fetch('/api/projects', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, ...payload })
-              });
-              if (res.ok) return true;
-              const err = await res.json().catch(() => ({}));
-              return { detail: err.detail || `HTTP ${res.status}` };
-            };
-            let result = await attempt(c.id_hint);
-            if (result !== true && /exists/i.test(result.detail || '')) {
-              result = await attempt(`${c.id_hint}-${Date.now().toString().slice(-4)}`);
-            }
-            if (result === true) { ok += 1; } else { failed.push(`${c.name}: ${result.detail}`); }
+            const finalId = await importWithConflictRetry(c);
+            if (finalId) { ok += 1; } else { failed.push(`${c.name}: ${c._error}`); }
           }
           showDiscoverModal.value = false;
           await refreshDashboard(true);
@@ -3045,6 +3153,7 @@ function applyTheme(themeId) {
         const openScenesModal = async () => {
           showScenesModal.value = true;
           await fetchScenes();
+          await detectScenes();
         };
 
         const fetchScenes = async () => {
@@ -3053,6 +3162,51 @@ function applyTheme(themeId) {
             if (res.ok) scenes.value = await res.json();
           } catch (e) {
             console.error('Failed to fetch scenes:', e);
+          }
+        };
+
+        /* ===== 场景自动检测：端口引用 + 命名配套 ===== */
+        const sceneSuggestions = ref([]);
+        const detectingScenes = ref(false);
+
+        const suggestionExists = (g) => scenes.value.some(sc => {
+          const a = sc.steps.map(s => s.project_id);
+          const b = g.steps.map(s => s.project_id);
+          return a.length === b.length && a.every(id => b.includes(id));
+        });
+
+        const detectScenes = async () => {
+          detectingScenes.value = true;
+          try {
+            const res = await fetch('/api/scenes/suggest');
+            if (res.ok) {
+              sceneSuggestions.value = ((await res.json()).groups || [])
+                .filter(g => !suggestionExists(g));
+            }
+          } catch (e) {
+            console.error('scene suggest failed:', e);
+          } finally {
+            detectingScenes.value = false;
+          }
+        };
+
+        const createSceneFromSuggestion = async (g) => {
+          try {
+            const res = await fetch('/api/scenes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: g.name, steps: g.steps.map(s => s.project_id) })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+              sceneSuggestions.value = sceneSuggestions.value.filter(x => x !== g);
+              await fetchScenes();
+              notify(`场景「${g.name}」已创建`, 'ok');
+            } else {
+              notify(`创建失败：${data.detail || '未知错误'}`, 'danger');
+            }
+          } catch (e) {
+            notify(`创建失败：${e.message}`, 'danger');
           }
         };
 
@@ -4024,6 +4178,7 @@ const resetPreferences = async () => {
           discoverRoot,
           discovering,
           discoverCandidates,
+          discoverGroups,
           discoverSelection,
           discoverError,
           discoverSelectedCount,
@@ -4032,10 +4187,17 @@ const resetPreferences = async () => {
           runDiscovery,
           toggleDiscoverCandidate,
           importDiscovered,
+          groupCandidateNames,
+          importGroupAsScene,
 
           showScenesModal,
           scenes,
           scenesBusy,
+          sceneSuggestions,
+          detectingScenes,
+          suggestionExists,
+          detectScenes,
+          createSceneFromSuggestion,
           newSceneName,
           newScenePick,
           newSceneSteps,

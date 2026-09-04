@@ -170,6 +170,168 @@ def _candidate_at(project_dir: str) -> Optional[dict]:
     return None
 
 
+_LOCAL_URL_RE = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\]|::1):(\d{2,5})", re.IGNORECASE)
+_OTHER_ENV_PORT_RE = re.compile(r"^\s*([A-Za-z0-9_]*?)PORT\s*=\s*(\d{2,5})", re.MULTILINE)
+_GROUP_ROLE_SUFFIXES = ("frontend", "backend", "webui", "dashboard", "web", "front", "server", "client", "api", "ui", "app")
+
+_DETECT_FILES = (
+    "vite.config.ts", "vite.config.js", "vite.config.mjs",
+    "next.config.js", "next.config.mjs",
+    "nuxt.config.ts", "nuxt.config.js",
+    "webpack.config.js", "vue.config.js",
+    ".env.local", ".env", ".env.development",
+)
+
+
+def _referenced_ports(cwd: str, own_port) -> set:
+    """项目配置/.env 里引用的**别的**服务端口（依赖信号）。
+
+    localhost:PORT 形式的 URL（vite proxy target、next rewrite、API_URL…）
+    以及 API_PORT=xxxx 这类非自身端口变量；自身 PORT / VITE_PORT 不算依赖。
+    """
+    refs = set()
+    for fname in _DETECT_FILES:
+        text = _read_text(os.path.join(cwd, fname))
+        if not text:
+            continue
+        for m in _LOCAL_URL_RE.finditer(text):
+            refs.add(int(m.group(1)))
+        for m in _OTHER_ENV_PORT_RE.finditer(text):
+            if m.group(1) not in ("", "VITE"):
+                refs.add(int(m.group(2)))
+    refs.discard(own_port)
+    return refs
+
+
+def _strip_role_suffix(name: str) -> str:
+    """cg-resource-hub-api -> cg-resource-hub；@scope/web-ui -> scope 名保留去 ui。"""
+    n = re.sub(r"^@[^/]+/", "", (name or "").strip().lower())
+    n = re.sub(r"[^a-z0-9_-]", "-", n)
+    changed = True
+    while changed and n:
+        changed = False
+        for suf in _GROUP_ROLE_SUFFIXES:
+            for sep in ("-", "_"):
+                if n.endswith(sep + suf):
+                    n = n[: -(len(suf) + 1)]
+                    changed = True
+    return n
+
+
+def _order_component(members: List[dict], deps: dict) -> List[str]:
+    """组内排序：被依赖的在前（Kahn），同层按端口，有环则兜底接尾。"""
+    ids = [m["id"] for m in members]
+    idset = set(ids)
+    port_of = {m["id"]: (m.get("port") or 0) for m in members}
+    indeg = {i: 0 for i in ids}
+    dependents: dict = {i: [] for i in ids}
+    for u in ids:
+        for v in deps.get(u, ()):
+            if v in idset:
+                indeg[u] += 1
+                dependents[v].append(u)
+    ready = sorted([i for i in ids if indeg[i] == 0], key=lambda i: port_of[i])
+    out = []
+    while ready:
+        node = ready.pop(0)
+        out.append(node)
+        for dep in dependents[node]:
+            indeg[dep] -= 1
+            if indeg[dep] == 0:
+                ready.append(dep)
+        ready.sort(key=lambda i: port_of[i])
+    out += sorted([i for i in ids if i not in set(out)], key=lambda i: port_of[i])
+    return out
+
+
+def _group_name(members: List[dict], deps: dict) -> str:
+    bases = {_strip_role_suffix(m.get("name") or "") for m in members}
+    bases.discard("")
+    if len(bases) == 1:
+        return bases.pop()
+    ref_count: dict = {}
+    for targets in deps.values():
+        for v in targets:
+            ref_count[v] = ref_count.get(v, 0) + 1
+    backend = max(members, key=lambda m: ref_count.get(m["id"], 0))
+    return _strip_role_suffix(backend.get("name") or "") \
+        or backend.get("name") or "scene"
+
+
+def detect_project_groups(projects: List[dict]) -> List[dict]:
+    """识别"要一起启动才能用"的项目组合。
+
+    信号优先级：
+      1. 端口引用 —— 项目配置/.env 里出现指向另一项目端口的 localhost URL
+         （vite proxy target、API_URL 等），即"启动我也得先启动它"；
+      2. 命名配套 —— 去掉 -api/-web/-server/-client 等角色后缀后同名的落单项目。
+
+    入参每项: {id, name, cwd, port}；返回 [{"name", "steps"(依赖在前), "reason"}]，
+    每个项目至多属于一组（端口引用组优先）。
+    """
+    items = [p for p in projects if p.get("id") and p.get("cwd")]
+    # 端口 → 项目 归因表：多个项目声明同一端口（如都吃 vite 默认 5173）时
+    # 该端口歧义，引用无法归因，直接弃用 —— 否则会产生假依赖边。
+    by_port: dict = {}
+    for p in items:
+        port = p.get("port")
+        if not port:
+            continue
+        if port in by_port:
+            by_port[port] = None
+        else:
+            by_port[port] = p
+    by_port = {k: v for k, v in by_port.items() if v is not None}
+    deps: dict = {}
+    for p in items:
+        for rp in _referenced_ports(p["cwd"], p.get("port")):
+            target = by_port.get(rp)
+            if target and target["id"] != p["id"]:
+                deps.setdefault(p["id"], set()).add(target["id"])
+
+    # 并查集：依赖边当无向看，连通分量 = "一套"
+    parent = {p["id"]: p["id"] for p in items}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for u, targets in deps.items():
+        for v in targets:
+            ru, rv = find(u), find(v)
+            if ru != rv:
+                parent[ru] = rv
+
+    components: dict = {}
+    for p in items:
+        components.setdefault(find(p["id"]), []).append(p)
+
+    groups: List[dict] = []
+    grouped = set()
+    for members in components.values():
+        if len(members) >= 2:
+            ids = _order_component(members, deps)
+            groups.append({"name": _group_name(members, deps),
+                           "steps": ids, "reason": "port-ref"})
+            grouped.update(ids)
+
+    leftovers = [p for p in items if p["id"] not in grouped]
+    by_base: dict = {}
+    for p in leftovers:
+        base = _strip_role_suffix(p.get("name") or "")
+        if len(base) >= 3:
+            by_base.setdefault(base, []).append(p)
+    for base, members in by_base.items():
+        if len(members) >= 2:
+            members.sort(key=lambda p: (0 if (p.get("name") or "").lower().endswith(
+                ("api", "server", "backend")) else 1, p.get("port") or 0))
+            groups.append({"name": base,
+                           "steps": [p["id"] for p in members], "reason": "name"})
+    return groups
+
+
 def discover_projects(root: str, max_depth: int = 2) -> List[dict]:
     """扫描 root（含 root 本身），返回可托管项目候选列表。
 
