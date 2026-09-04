@@ -411,20 +411,57 @@ def _collect_managed_pids() -> Dict[int, str]:
     return pid_to_project
 
 
+def _project_cwd_map() -> dict:
+    """归一化的项目 cwd -> 项目 id；同目录多个项目视为歧义，不参与归因。"""
+    cwd_map: dict = {}
+    for p in load_projects():
+        cwd = p.get("cwd")
+        if not cwd:
+            continue
+        key = os.path.normcase(os.path.normpath(cwd))
+        if key in cwd_map:
+            cwd_map[key] = None
+        else:
+            cwd_map[key] = p["id"]
+    return {k: v for k, v in cwd_map.items() if v}
+
+
+def _project_by_process_cwd(proc_cwd: str, cwd_map: dict) -> Optional[str]:
+    """按进程工作目录归因项目：精确命中优先，其次"在某项目目录之下"（monorepo）。"""
+    if not proc_cwd or not cwd_map:
+        return None
+    key = os.path.normcase(os.path.normpath(proc_cwd))
+    hit = cwd_map.get(key)
+    if hit:
+        return hit
+    for proj_cwd, project_id in cwd_map.items():
+        if key.startswith(proj_cwd.rstrip("\\/") + os.sep):
+            return project_id
+    return None
+
+
 def _enrich_with_dashboard_project(ports: List[dict]) -> List[dict]:
-    """Add ``dashboard_project`` field to each port dict, mapping PID -> project_id.
+    """Add ``dashboard_project`` to each port dict, mapping PID -> project_id.
 
-    Lookup priority:
-      1. ACTIVE_PROCESSES (in-memory, has the Popen objects) - authoritative
-      2. running_pids.json (persisted registry, may have stale entries if process died)
-
-    Matching covers the whole managed process tree, not just the root PID.
+    归因优先级：
+      1. 托管进程树（ACTIVE_PROCESSES + running_pids.json，含全部子孙）—— 权威
+      2. **cwd 归因** —— 进程工作目录对上某个项目的 cwd（或其子目录）。
+         解决"用户手动在终端里启动了项目"的边界：不是面板起的，但端口
+         显然属于这个项目。此时仍标记为外部进程（面板不会去杀它），
+         但归属清晰。
     """
     pid_to_project = _collect_managed_pids()
-    # Apply to each port
+    cwd_map = _project_cwd_map()
     for port_info in ports:
         pid = port_info.get("pid")
-        port_info["dashboard_project"] = pid_to_project.get(pid) if pid else None
+        owner = pid_to_project.get(pid) if pid else None
+        if owner:
+            port_info["dashboard_project"] = owner
+            port_info["attribution"] = "managed"
+            continue
+        owner = _project_by_process_cwd(port_info.get("cwd") or "", cwd_map)
+        port_info["dashboard_project"] = owner
+        port_info["attribution"] = "cwd" if owner else None
     return ports
 
 
@@ -681,6 +718,7 @@ def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map:
     current_pid = None
     process_owner = "Unknown"
     managed = False
+    external_self = False
 
     with PROC_LOCK:
         proc = ACTIVE_PROCESSES.get(project_id)
@@ -708,6 +746,11 @@ def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map:
         status = "external"
         current_pid = port_match["pid"]
         process_owner = f"External ({port_match['process']})"
+        # cwd 归因命中：不是面板起的，但监听进程的工作目录就是这个项目 ——
+        # 让卡片如实显示"本项目（外部启动）"而不是泛泛的外部占用。
+        external_self = port_match.get("attribution") == "cwd"
+        if external_self:
+            process_owner = f"External ({port_match['process']} · 本项目目录)"
 
     state = {
         **project,
@@ -717,6 +760,7 @@ def get_project_runtime_state(project: dict, active_ports: List[dict], pids_map:
         "port_active": port_match is not None,
         "port_process": port_match,
         "managed": managed,
+        "external_self": external_self,
     }
     return state, dirty
 
@@ -888,6 +932,7 @@ def group_ports_by_process(ports: List[dict]) -> List[dict]:
             'process_name': primary.get('process', 'Unknown'),
             'project_name': primary.get('project_name', ''),
             'cwd': primary.get('cwd', ''),
+            'dashboard_project': primary.get('dashboard_project'),
             'ports': [p['port'] for p in port_list],
             'primary_port': primary['port'],
             'is_http': primary.get('is_http', False),

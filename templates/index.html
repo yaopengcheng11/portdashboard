@@ -3651,6 +3651,14 @@ const resetPreferences = async () => {
             };
           }
           if (proj.status === 'external') {
+            if (proj.external_self) {
+              /* cwd 归因命中：监听进程的工作目录就是这个项目，只是不由面板启动 */
+              return {
+                label: '本项目 · 外部启动',
+                tone: 'warn',
+                class: 'text-amber-300 border-amber-500/40 bg-amber-950/30'
+              };
+            }
             return {
               label: '外部运行中',
               tone: 'info',
@@ -3676,6 +3684,18 @@ const resetPreferences = async () => {
         };
 
         const showExternalStateHelp = (proj) => {
+          if (proj.external_self) {
+            notifyDialog(
+              `项目「${proj.name}」处于【本项目 · 外部启动】状态。\n\n` +
+              `面板在项目目录（${proj.cwd}）里发现了它监听的进程，` +
+              `但这个进程不是由面板启动的（比如你在终端手动跑了启动命令）。\n\n` +
+              `想让面板接管它的生命周期：\n` +
+              `1. 到「全局端口」页终止该进程（端口 ${proj.port} 的那个）\n` +
+              `2. 回到这里点「启动」，之后就是标准的托管运行`,
+              { tone: 'info', title: '本项目 · 外部启动' }
+            );
+            return;
+          }
           notifyDialog(
             `项目「${proj.name}」当前处于【外部运行中】状态。\n\n` +
             `端口 ${proj.port} 已被 ${proj.owner || '外部进程'} 占用，dashboard 可以识别它在运行，但不会把它当成“托管启动”的项目。\n\n` +

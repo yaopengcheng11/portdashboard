@@ -1,3 +1,4 @@
+import os
 import socket
 import sys
 from pathlib import Path
@@ -224,6 +225,52 @@ class TestScenes:
 
     def test_slugify_available_for_scene_ids(self):
         assert app.slugify_project_id("客户 项目 Dev") == "dev"
+
+
+class TestCwdAttribution:
+    """cwd 归因 —— 手动启动的项目也能对上端口归属。"""
+
+    def test_exact_subdir_ambiguous_and_miss(self, monkeypatch, tmp_path):
+        proj_a = tmp_path / "proj-a"
+        (proj_a / "packages" / "ui").mkdir(parents=True)
+        proj_b = tmp_path / "proj-b"
+        proj_b.mkdir()
+        projects = [
+            {"id": "a", "cwd": str(proj_a), "port": 1},
+            {"id": "b", "cwd": str(proj_b), "port": 2},
+        ]
+        monkeypatch.setattr(app, "load_projects", lambda: projects)
+        cwd_map = app._project_cwd_map()
+
+        assert app._project_by_process_cwd(str(proj_a), cwd_map) == "a"
+        # monorepo：监听进程 cwd 在项目目录之下，也算
+        assert app._project_by_process_cwd(str(proj_a / "packages" / "ui"), cwd_map) == "a"
+        assert app._project_by_process_cwd(str(proj_b), cwd_map) == "b"
+        assert app._project_by_process_cwd(str(tmp_path / "elsewhere"), cwd_map) is None
+        assert app._project_by_process_cwd("", cwd_map) is None
+
+        # 同目录两个项目 → 歧义，宁可归不到也不乱归
+        projects.append({"id": "c", "cwd": str(proj_a), "port": 3})
+        ambiguous = app._project_cwd_map()
+        assert app._project_by_process_cwd(str(proj_a), ambiguous) is None
+
+    def test_enrich_attribution_priority(self, monkeypatch, tmp_path):
+        d = tmp_path / "proj"
+        d.mkdir()
+        monkeypatch.setattr(app, "load_projects",
+                            lambda: [{"id": "p1", "cwd": str(d), "port": 2}])
+        monkeypatch.setattr(app, "_collect_managed_pids", lambda: {999: "managed"})
+        ports = [
+            {"port": 1, "pid": 999, "cwd": ""},
+            {"port": 2, "pid": 1000, "cwd": str(d)},
+            {"port": 3, "pid": 1001, "cwd": str(tmp_path / "unknown")},
+            {"port": 4, "pid": None, "cwd": str(d)},
+        ]
+        out = app._enrich_with_dashboard_project(ports)
+        assert out[0]["dashboard_project"] == "managed" and out[0]["attribution"] == "managed"
+        assert out[1]["dashboard_project"] == "p1" and out[1]["attribution"] == "cwd"
+        assert out[2]["dashboard_project"] is None and out[2]["attribution"] is None
+        assert out[3]["dashboard_project"] == "p1" and out[3]["attribution"] == "cwd"  # pid 未知也能靠 cwd
 
 
 class TestIsSystemPort:
