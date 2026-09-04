@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from typing import List, Optional, Tuple
 
 SKIP_DIRS = {
@@ -146,11 +147,14 @@ def _python_candidate(project_dir: str) -> Optional[dict]:
         return None  # 没有Web依赖的 python 目录（脚本/库）不猜
 
     port = _port_from_env_files(project_dir) or 8000
+    # 现代 macOS 没有裸 python（只有 python3），Linux 发行版也普遍如此；
+    # Windows 才叫 python。生成的命令必须开箱能跑。
+    python_bin = "python" if sys.platform == "win32" else "python3"
     return {
         "cwd": project_dir,
         "name": os.path.basename(project_dir),
         "kind": "python",
-        "command": f"python {entry}",
+        "command": f"{python_bin} {entry}",
         "port": port,
         "port_source": ".env PORT" if _port_from_env_files(project_dir) else "web.py default",
         "id_hint": slugify_project_id(os.path.basename(project_dir)),

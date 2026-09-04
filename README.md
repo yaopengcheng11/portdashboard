@@ -80,11 +80,24 @@
 
 | 平台 | 支持状态 | 端口扫描 | 进程终止 |
 |------|---------|---------|---------|
-| **Windows** | ✅ 完整 | `netstat -ano` + `tasklist` | `taskkill /F /T` |
-| **Linux**   | ✅ 完整 | `netstat -tlnp` + psutil | `killpg` + SIGTERM/kill |
-| **macOS**   | ✅ 完整 | `psutil.net_connections("tcp")` 逐进程枚举 | `killpg` + SIGTERM/kill |
+| **macOS**   | ✅ 一等公民 | 逐进程 `psutil.net_connections`（无 root 也可用） | `killpg` SIGTERM → 超时 SIGKILL |
+| **Linux**   | ✅ 一等公民 | `psutil.net_connections`（procfs） | `killpg` SIGTERM → 超时 SIGKILL |
+| **Windows** | ✅ 一等公民 | `netstat -ano` + `tasklist` / psutil | `taskkill /F /T` |
 
-> macOS 备注：`netstat -p` 在 macOS 上是 protocol 参数而非显示 PID，且输出以 `.` 分隔地址 —— 旧实现因此净空，v2026.08-2 起统一走 psutil。
+Unix 优先的细节（v2026.09-1 起与 Windows 完全对等，部分更强）：
+
+- **python3 链路**：现代 macOS（12.3+）没有裸 `python`——自动发现生成的 Python 启动命令在
+  Unix 上用 `python3`；用户从 Windows 拷来的配置写着 `python` 时，启动器会静默回退解析
+- **HTTP 探测双栈**：v4 拒连时自动探测 `::1`——macOS 上 vite/next 绑 `localhost` 常只落 IPv6，
+  这些服务的 HTTP 识别（含"访问页面"的 is_http 判断）不再漏报
+- **核心守护保护**：WindowServer / securityd / mdnsresponder / sshd / systemd-resolved /
+  dbus-daemon 等与 Windows 的 svchost/lsass 同级硬保护，前端"极危"评级同步
+- **优雅停止是 Unix 默认**：`SIGTERM` → 等待 3s → `SIGKILL` 升级（Windows 为强制 taskkill）
+- **开箱体验一致**：`start.sh` / `start.bat` 都会自动创建 `.venv` 并安装依赖，绑定地址与端口
+  解析逻辑完全相同（默认 127.0.0.1）
+
+> macOS 备注：系统级 `net_connections` 需要 root，逐进程枚举是常态路径
+> （v2026.08-2 起），实测非 root 用户约四成系统进程会拒绝枚举，属正常跳过。
 
 ---
 
@@ -431,6 +444,27 @@ MIT License
 ---
 
 ## 更新日志
+
+### v2026.09-1 — macOS/Linux 一等公民
+
+**Unix 先行:**
+- 🐍 **python3 命令链路** —— discovery 生成的 Python 启动命令在 macOS/Linux 用 `python3`
+  （现代 macOS 12.3+ 已无裸 python）；`_resolve_executable` 对 Unix 上解析不到的 `python`
+  静默回退 `python3` —— Windows 拷来的配置照样能跑
+- 🌐 **HTTP 探测双栈** —— v4 拒连时再探 `::1`。macOS 上 vite/next 默认绑 `localhost` 时
+  常只落 IPv6，此前这些服务在"本地端口"页永远识别不出 HTTP。真实 socket 回归测试覆盖
+  v4 / ::1-only / raw TCP / 空端口四种情形
+- 🛡️ **Unix 保护名单扩充** —— 新增 macOS（WindowServer / securityd / mdnsresponder /
+  opendirectoryd / cfprefsd / diskarbitrationd / powerd / hidd）与 Linux（sshd /
+  systemd-resolved / udevd / dbus-daemon / polkitd / networkmanager / snapd / rsyslogd /
+  cron / atd）核心守护，与 Windows 的 svchost/lsass 同级硬保护；前端"极危"评级名单同步
+- 📦 **start.bat 自动建 venv** —— 与 start.sh 对齐：没有 `.venv` 就自动创建并安装依赖，
+  双平台开箱体验一致（真机验证：创建 → 装依赖 → 启动 → API 200）
+- ⚖️ 停止语义本就 Unix 更优：`SIGTERM` → 等待 3s → `SIGKILL` 升级（Windows 为强制 taskkill）
+
+**验证:**
+- ✅ pytest 73 passed（`tests/test_cross_platform.py` 新增 19 个跨平台用例：
+  双栈探测真 socket 断言、python3 回退 monkeypatch 断言、守护拒杀断言）
 
 ### v2026.09 — 安全修复 + 进程树感知 + MCP Server
 

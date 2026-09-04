@@ -3908,6 +3908,13 @@ const resetPreferences = async () => {
             proc.includes('csrss') ||
             proc.includes('wininit') ||
             proc.includes('services') ||
+            proc.includes('windowserver') ||
+            proc.includes('securityd') ||
+            proc.includes('mdnsresponder') ||
+            proc.includes('opendirectoryd') ||
+            proc.includes('cfprefsd') ||
+            proc.includes('diskarbitrationd') ||
+            proc.includes('sshd') ||
             p === 135 ||
             p === 445 ||
             p === 139;

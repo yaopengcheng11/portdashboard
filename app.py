@@ -764,6 +764,12 @@ PROTECTED_PROCESSES_WINDOWS = {
 PROTECTED_PROCESSES_UNIX = {
     "init", "systemd", "launchd", "kernel_task",
     "kthreadd", "ksoftirqd", "migration", "kworker",
+    # macOS 核心守护（误杀即系统级故障）
+    "windowserver", "securityd", "mdnsresponder", "opendirectoryd",
+    "syslogd", "cfprefsd", "cfprefsdd", "diskarbitrationd", "powerd", "hidd",
+    # Linux 核心守护（sshd 被杀会锁死远程会话）
+    "dbus-daemon", "dbusd", "polkitd", "networkmanager", "systemd-resolved",
+    "udevd", "sshd", "snapd", "rsyslogd", "cron", "crond", "atd",
 }
 
 
@@ -959,6 +965,11 @@ def _resolve_executable(argv: List[str]) -> List[str]:
     if os.path.dirname(exe):
         return argv  # 已带路径，尊重用户写法
     resolved = shutil.which(exe)
+    if not resolved and not IS_WINDOWS and exe in ("python", "python.exe"):
+        # 现代 macOS（12.3+ 移除了 /usr/bin/python）与多数 Linux 发行版
+        # 只有 python3 —— 用户从 Windows 拷来的配置里写着 python 时，
+        # 静默回退到 python3，而不是启动失败。
+        resolved = shutil.which("python3")
     if resolved:
         return [resolved] + argv[1:]
     return argv  # 保持原样，让 Popen 抛出可读的 FileNotFoundError

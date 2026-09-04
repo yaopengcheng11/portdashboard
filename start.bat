@@ -12,50 +12,34 @@ echo              P O R T   D A S H B O A R D
 echo ======================================================
 echo.
 
-:: Find Python with fastapi installed
-set "PYTHON_EXE="
+cd /d "%~dp0"
 
-:: Try .venv in project directory first
-if exist "%~dp0.venv\Scripts\python.exe" (
-    "%~dp0.venv\Scripts\python.exe" -c "import fastapi, uvicorn" >nul 2>&1
-    if not errorlevel 1 (
-        set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
-        goto :found
-    )
-)
+:: 与 start.sh 行为对齐：没有 .venv 就自动创建并安装依赖
+if exist ".venv\Scripts\python.exe" goto :venv-ready
 
-:: Try system python
+echo [setup] .venv 不存在，自动创建虚拟环境...
 where python >nul 2>&1
-if not errorlevel 1 (
-    python -c "import fastapi, uvicorn" >nul 2>&1
-    if not errorlevel 1 (
-        set "PYTHON_EXE=python"
-        goto :found
-    )
+if errorlevel 1 (
+    echo [ERROR] 未找到 python，无法自动创建虚拟环境。
+    echo         请安装 Python 3.11+ 后重试，或手动: python -m venv .venv
+    exit /b 1
 )
-
-:: Try python3
-where python3 >nul 2>&1
-if not errorlevel 1 (
-    python3 -c "import fastapi, uvicorn" >nul 2>&1
-    if not errorlevel 1 (
-        set "PYTHON_EXE=python3"
-        goto :found
-    )
+python -m venv .venv
+if errorlevel 1 (
+    echo [ERROR] 虚拟环境创建失败。
+    exit /b 1
 )
+".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 (
+    echo [ERROR] 依赖安装失败，请检查网络后重试。
+    exit /b 1
+)
+echo.
 
-echo [ERROR] No Python with fastapi+uvicorn found.
-echo.
-echo Install dependencies:
-echo   pip install fastapi uvicorn psutil
-echo.
-echo Or create a venv:
-echo   python -m venv .venv
-echo   .venv\Scripts\pip install fastapi uvicorn psutil
-echo.
-exit /b 1
+:venv-ready
+set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
 
-:found
 if "%MODE%"=="dev" (
     set "PORT_DASHBOARD_RELOAD=1"
     set "MODE_LABEL=Dev mode (hot reload ON)"
@@ -74,5 +58,4 @@ echo Press Ctrl+C to stop.
 echo ------------------------------------------------------
 echo.
 
-cd /d "%~dp0"
 "%PYTHON_EXE%" app.py

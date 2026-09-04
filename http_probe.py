@@ -44,28 +44,38 @@ def check_http_port(port: int, timeout: float = 1.5) -> bool:
     port only when the status code is <400 AND the body is recognizably
     web (text/html, text/plain, JSON/XML/JS, or a "<html" / "<!doctype"
     marker in the body).
+
+    双栈：先试 127.0.0.1；连接被拒绝（v4 上没人听）再试 ``::1``。
+    macOS 上 vite/next 等默认绑 ``localhost`` 时经常只落在 ``::1``——
+    只探 v4 会让这些服务在"本地端口"页永远是 is_http=False。
     """
+    # v4 拒连才换 v6：v4 有响应（哪怕是慢/非 web 内容）就以 v4 结论为准
+    connected, is_web = _probe_once(("127.0.0.1", port), timeout)
+    if connected:
+        return is_web
+    _, is_web = _probe_once(("::1", port), timeout)
+    return is_web
+
+
+def _probe_once(addr: tuple, timeout: float) -> tuple:
+    """Return ``(connected, is_web)``；连接不上时 ``(False, False)``。"""
+    family = socket.AF_INET6 if ":" in addr[0] else socket.AF_INET
     sock = None
     try:
-        sock = _open_connection(port, timeout)
-        response = _send_request_and_read(sock, timeout)
-        return _response_is_web_content(response)
-    except Exception:
-        return False
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect(addr)
+    except (ConnectionRefusedError, socket.timeout, OSError):
+        return False, False
+    try:
+        return True, _response_is_web_content(_send_request_and_read(sock, timeout))
+    except OSError:
+        return True, False
     finally:
-        if sock is not None:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-
-def _open_connection(port: int, timeout: float) -> socket.socket:
-    """Open a TCP socket to 127.0.0.1:port and arm the read timeout."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    sock.connect(("127.0.0.1", port))
-    return sock
+        try:
+            sock.close()
+        except Exception:
+            pass
 
 
 def _send_request_and_read(sock: socket.socket, timeout: float) -> bytes:
