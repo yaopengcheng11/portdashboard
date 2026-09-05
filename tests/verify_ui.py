@@ -21,7 +21,7 @@ URL = "http://127.0.0.1:9229"
 ROOT = Path(__file__).resolve().parent.parent
 SHOT_DIR = ROOT / ".uishots"
 THEMES = ["dark-emerald", "blueprint", "midnight", "arctic", "terra", "neon", "velvet"]
-TABS = ["managed", "local", "system"]
+TABS = ["managed", "local", "system", "scenes"]
 
 # ---------------------------------------------------------------- fixtures
 
@@ -171,7 +171,7 @@ async def set_tab(page, tab):
         const app = document.querySelector('#app').__vue_app__;
         return null;
       }})()""")
-    labels = {"managed": "托管项目", "local": "本地端口", "system": "全局端口"}
+    labels = {"managed": "托管项目", "local": "本地端口", "system": "全局端口", "scenes": "场景 ("}
     btn = page.locator("button", has_text=labels[tab]).first
     if await btn.count():
         await btn.click()
@@ -726,6 +726,82 @@ async def run(phase, baseline, keep_shots):
                     failures.append(f"创建 payload 不符: {body}")
             if await card.count() != 0:
                 failures.append("创建成功后建议卡未消失")
+            await page.keyboard.press("Escape")     # 收尾关弹窗，别让 P12 踩到 scrim
+            await page.wait_for_timeout(300)
+
+        # --- P12：场景标签页（一等公民视图：卡片/状态 chips/启动动作/建议卡） ---
+        if phase >= 12:
+            await page.keyboard.press("Escape")     # 关掉 P11 遗留的场景弹窗
+            await page.wait_for_timeout(300)
+            scene_action_urls = []
+            await page.route("**/api/scenes", lambda r: asyncio.ensure_future(_scenes_list_route(r)))
+            await page.route("**/api/scenes/**", lambda r: (
+                scene_action_urls.append(r.request.url) if r.request.method == "POST" else None,
+                asyncio.ensure_future(r.fulfill(
+                    status=200, content_type="application/json",
+                    body=json.dumps({"success": True, "results": []})))
+            )[-1])
+
+            async def _scenes_list_route(route):
+                req = route.request
+                if req.method == "POST":
+                    scene_action_urls.append(req.url)
+                    await route.fulfill(status=200, content_type="application/json",
+                                        body=json.dumps({"success": True}))
+                else:
+                    await route.fulfill(status=200, content_type="application/json",
+                                        body=json.dumps([
+                                            {"id": "demo-suite", "name": "Demo Suite",
+                                             "up_count": 0, "total": 2,
+                                             "steps": [
+                                                 {"project_id": "api", "name": "API 服务", "state": "managed"},
+                                                 {"project_id": "web", "name": "Web 前端", "state": "stopped"},
+                                             ]}]))
+
+            # 建议集合刻意与已存在场景的步骤不同 —— 否则会被 suggestionExists 正确去重
+            await page.route("**/api/scenes/suggest", lambda r: asyncio.ensure_future(r.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"groups": [
+                    {"name": "demo-suite", "reason": "port-ref", "steps": [
+                        {"project_id": "web", "name": "Web 前端", "state": "stopped"},
+                    ]},
+                ]}))))
+
+            await set_tab(page, "scenes")
+            await page.wait_for_timeout(500)
+
+            tab_card = page.locator('.pd-pane .pd-card:has-text("Demo Suite")')
+            if not await tab_card.count():
+                failures.append("场景页没有渲染场景卡片")
+            else:
+                card_text = await tab_card.first.inner_text()
+                print(f"[P12] 场景卡: {card_text.split(chr(10))[:3]}")
+                if "0/2" not in card_text:
+                    failures.append(f"场景卡状态徽章不符: {card_text[:60]}")
+                if "API 服务 · 托管运行" not in card_text or "Web 前端 · 已停止" not in card_text:
+                    failures.append(f"步骤 chips 状态不符: {card_text[:80]}")
+                start_btn = tab_card.first.locator('button:has-text("启动")')
+                await start_btn.click()
+                await page.wait_for_timeout(400)
+                if not any(u.endswith("/api/scenes/demo-suite/start") for u in scene_action_urls):
+                    failures.append(f"场景卡「启动」未发出 start 请求: {scene_action_urls[:2]}")
+                print(f"[P12] start 请求: {[u.split('/')[-2:] for u in scene_action_urls]}")
+
+            sug = page.locator('.pd-pane .pd-card:has-text("demo-suite")')
+            if not await sug.count():
+                failures.append("场景页没有渲染自动检测建议卡")
+
+            # chips 点击 → 细查跳转托管页
+            chip = page.locator('.pd-pane .pd-badge:has-text("API 服务")').first
+            await chip.click()
+            await page.wait_for_timeout(300)
+            if not await page.locator('.pd-pane:visible input[placeholder*="my-app"], .pd-pane button[title="扫描目录，批量发现可托管的项目"]').count():
+                pass  # 托管页元素存在与否由 P9 断言兜底
+            tab_active = await page.evaluate("""document.querySelector('.pd-tab.is-active')?.textContent || ''""")
+            if "托管项目" not in tab_active:
+                failures.append(f"点击步骤 chip 未跳回托管页（当前 active: {tab_active}）")
+            print(f"[P12] chip 跳转后 active tab: {tab_active.strip()}")
+            await set_tab(page, "scenes")
 
         print(f"\n[通用] 控制台错误 ({len(errors)}):")
         for e in errors[:6]:

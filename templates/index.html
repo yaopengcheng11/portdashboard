@@ -1812,6 +1812,8 @@ function applyTheme(themeId) {
                     @click="activeTab = 'local'">本地端口 ({{ groupedLocalPorts.length }})</button>
             <button class="pd-tab" :class="activeTab === 'system' ? 'is-active' : ''"
                     @click="activeTab = 'system'">全局端口 ({{ systemPorts.length }})</button>
+            <button class="pd-tab" :class="activeTab === 'scenes' ? 'is-active' : ''"
+                    @click="switchTab('scenes')">场景 ({{ scenes.length }})</button>
           </div>
 
           <!-- 高危操作安全防护锁 -->
@@ -2024,6 +2026,86 @@ function applyTheme(themeId) {
                   </button>
                 </div>
               </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 场景面板 -->
+        <div v-if="activeTab === 'scenes'" class="pd-pane">
+
+          <div class="pd-row pd-row--between" style="margin-bottom: var(--st-4);">
+            <div>
+              <div style="font-size:15px; font-weight:700;">场景</div>
+              <div style="font-size:11px; opacity:.7;">日常开工/收工看这里；细查单个项目再进「托管项目」</div>
+            </div>
+            <div class="pd-row" style="gap:8px;">
+              <button class="pd-btn pd-btn--sm" :disabled="detectingScenes" @click="detectScenes()"
+                      title="重新检测已托管项目里的配套组合">
+                {{ detectingScenes ? '检测中…' : '重新检测' }}
+              </button>
+              <button class="pd-btn pd-btn--sm" @click="openDiscoverModal()">扫描导入</button>
+              <button class="pd-btn pd-btn--sm pd-btn--solid" data-tone="accent" @click="openScenesModal()">新建场景</button>
+            </div>
+          </div>
+
+          <div class="pd-scroll">
+
+            <!-- 自动检测建议 -->
+            <div v-if="sceneSuggestions.length" style="margin-bottom: var(--st-5);">
+              <div style="font-size:10px; letter-spacing:.08em; opacity:.65; margin-bottom:8px;">检测到的配套组合（依据端口引用与命名配套）</div>
+              <div class="pd-stack">
+                <div v-for="g in sceneSuggestions" :key="'sug-' + g.name" class="pd-card" style="padding:10px 14px;">
+                  <div class="pd-row" style="align-items:center;">
+                    <div class="pd-grow" style="min-width:0;">
+                      <div class="pd-row" style="gap:6px; align-items:center;">
+                        <strong style="font-size:13px;">{{ g.name }}</strong>
+                        <span class="pd-badge" data-tone="info">{{ g.reason === 'port-ref' ? '端口引用' : '同名配套' }}</span>
+                      </div>
+                      <div style="font-size:11px; opacity:.75; margin-top:2px;">{{ (g.steps || []).map(s => s.name).join(' → ') }}</div>
+                    </div>
+                    <button class="pd-btn pd-btn--sm pd-btn--solid" data-tone="accent"
+                            :disabled="suggestionExists(g)" @click="createSceneFromSuggestion(g)">创建场景</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 场景卡片 -->
+            <div class="pd-stack" v-if="scenes.length">
+              <div v-for="sc in scenes" :key="sc.id" class="pd-card" style="padding:12px 14px;">
+                <div class="pd-row" style="align-items:center; margin-bottom:8px;">
+                  <div class="pd-grow pd-row" style="gap:8px; align-items:center; min-width:0;">
+                    <strong style="font-size:14px;">{{ sc.name }}</strong>
+                    <span class="pd-badge"
+                          :data-tone="sc.total && sc.up_count === sc.total ? 'ok' : (sc.up_count ? 'warn' : 'muted')">
+                      {{ sc.up_count }}/{{ sc.total }} 运行中
+                    </span>
+                  </div>
+                  <button class="pd-btn pd-btn--sm" data-tone="ok"
+                          :disabled="scenesBusy === sc.id || (sc.total > 0 && sc.up_count === sc.total)"
+                          @click="runScene(sc, 'start')">启动</button>
+                  <button class="pd-btn pd-btn--sm" data-tone="danger"
+                          :disabled="scenesBusy === sc.id || !sc.up_count"
+                          @click="runScene(sc, 'stop')">停止</button>
+                  <button class="pd-btn pd-btn--ghost pd-btn--icon" title="删除场景" @click="deleteScene(sc)">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                  </button>
+                </div>
+                <div class="pd-row" style="gap:6px; flex-wrap:wrap;">
+                  <span v-for="s in sc.steps" :key="s.project_id" class="pd-badge"
+                        :data-tone="stepTone(s.state)" style="cursor:pointer;"
+                        :title="'细查 ' + s.name + '（转到托管项目）'"
+                        @click="switchTab('managed')">
+                    {{ s.name }} · {{ stepLabel(s.state) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="!sceneSuggestions.length"
+                 style="font-size:12px; opacity:.7; padding: var(--st-6) 0; text-align:center;">
+              还没有场景。点「新建场景」手动创建，或先「扫描导入」让面板自动发现项目与配套组合。
             </div>
 
           </div>
@@ -2783,7 +2865,7 @@ function applyTheme(themeId) {
                     <span v-if="suggestionExists(g)" class="pd-badge" data-tone="muted">已有场景</span>
                   </div>
                   <div style="font-size:11px; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                    {{ g.steps.map(s => s.name).join(' → ') }}
+                    {{ (g.steps || []).map(s => s.name).join(' → ') }}
                   </div>
                 </div>
                 <button class="pd-btn pd-btn--sm pd-btn--solid" data-tone="accent" style="flex:none;"
@@ -2805,7 +2887,7 @@ function applyTheme(themeId) {
                   </span>
                 </div>
                 <div style="font-size:11px; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                  {{ sc.steps.map(s => s.name).join(' → ') }}
+                  {{ (sc.steps || []).map(s => s.name).join(' → ') }}
                 </div>
               </div>
               <button class="pd-btn pd-btn--sm" data-tone="ok" style="flex:none;"
@@ -3070,7 +3152,7 @@ function applyTheme(themeId) {
         const groupCandidateNames = (g) => {
           const byHint = {};
           for (const c of discoverCandidates.value) byHint[c.id_hint] = c;
-          return g.steps.map(h => (byHint[h] ? byHint[h].name : h)).join(' → ');
+          return (g.steps || []).map(h => (byHint[h] ? byHint[h].name : h)).join(' → ');
         };
 
         /* 一键：把一组配套候选按依赖顺序导入，并直接建好场景 */
@@ -3170,8 +3252,8 @@ function applyTheme(themeId) {
         const detectingScenes = ref(false);
 
         const suggestionExists = (g) => scenes.value.some(sc => {
-          const a = sc.steps.map(s => s.project_id);
-          const b = g.steps.map(s => s.project_id);
+          const a = (sc.steps || []).map(s => s.project_id);
+          const b = (g.steps || []).map(s => s.project_id);
           return a.length === b.length && a.every(id => b.includes(id));
         });
 
@@ -3311,8 +3393,22 @@ const themeLabels = Object.fromEntries(themeList.map(t => [t.id, t.label]));
 const defaultTabOptions = [
   { id: 'managed', label: '托管', desc: '你管理的项目' },
   { id: 'local',   label: '本地', desc: '本机监听' },
-  { id: 'system',  label: '全局', desc: '全部端口' }
+  { id: 'system',  label: '全局', desc: '全部端口' },
+  { id: 'scenes',  label: '场景', desc: '按组合一键启停' }
 ];
+
+/* 场景步骤的状态 → tone/文案（场景页 chips 用） */
+const stepTone = (state) => ({ managed: 'ok', external: 'info', stopped: 'muted', missing: 'danger' }[state] || 'muted');
+const stepLabel = (state) => ({ managed: '托管运行', external: '外部服务', stopped: '已停止', missing: '已移除' }[state] || state);
+
+/* 统一的切页入口：进入场景页时拉取列表并重跑自动检测 */
+const switchTab = (tab) => {
+  activeTab.value = tab;
+  if (tab === 'scenes') {
+    fetchScenes();
+    detectScenes();
+  }
+};
 
 /* 与后端 ALLOWED_CATEGORIES 保持一致：network / system 会被后端丢弃 */
 const defaultCategoryOptions = [
@@ -3381,7 +3477,7 @@ const fetchPreferences = async () => {
     if (!prefsHydrated) {
       prefsHydrated = true;
       if (defaultTabOptions.some(o => o.id === defaultTab.value)) {
-        activeTab.value = defaultTab.value;
+        switchTab(defaultTab.value);
       }
       if (defaultCategoryOptions.some(o => o.id === defaultCategory.value)) {
         localCategoryFilter.value = defaultCategory.value;
@@ -4218,6 +4314,9 @@ const resetPreferences = async () => {
           suggestionExists,
           detectScenes,
           createSceneFromSuggestion,
+          switchTab,
+          stepTone,
+          stepLabel,
           newSceneName,
           newScenePick,
           newSceneSteps,

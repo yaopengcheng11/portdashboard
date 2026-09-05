@@ -25,5 +25,29 @@
     "sync_name": false,
     "startup_timeout_sec": 30,
     "health_check_url": ""
+  },
+  {
+    "id": "cg-resource-hub-api",
+    "name": "CG Resource Hub API",
+    "cwd": "G:/AITOOLS/cg-resource-hub/api",
+    "command": "npx tsx watch server.ts",
+    "port": 8789,
+    "description": "cg-resource-hub 后端 API（tsx watch）",
+    "sync_name": false,
+    "auto_restart": false,
+    "startup_timeout_sec": 30,
+    "health_check_url": ""
+  },
+  {
+    "id": "cg-resource-hub-web",
+    "name": "CG Resource Hub Web",
+    "cwd": "G:/AITOOLS/cg-resource-hub/web",
+    "command": "npm run dev",
+    "port": 5173,
+    "description": "cg-resource-hub 前端 Vite dev server",
+    "sync_name": false,
+    "auto_restart": false,
+    "startup_timeout_sec": 30,
+    "health_check_url": ""
   }
 ]

@@ -1824,7 +1824,7 @@ def serve_dashboard():
 
 ALLOWED_THEMES = {"dark-emerald", "blueprint", "midnight", "arctic", "terra", "neon", "velvet"}
 ALLOWED_CATEGORIES = {"all", "user", "creative"}
-ALLOWED_TABS = {"managed", "local", "system"}
+ALLOWED_TABS = {"managed", "local", "system", "scenes"}
 ALLOWED_REFRESH_INTERVALS = (3, 5, 10, 15, 30, 60)
 
 DEFAULT_PREFERENCES = {
